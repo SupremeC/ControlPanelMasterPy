@@ -19,6 +19,10 @@ git config --global user.name "David Berglund"
 # Audio effects
 pip install pedalboard
 
+# reconnect wifi on lost connection (beware of win chars)
+# https://gist.github.com/carry0987/372b9fefdd8041d0374f4e08fbf052b1
+# dos2unix wifi-reconnect.sh
+
 # setserial to check and use serial ports from bash
 sudo apt install setserial
 

@@ -8,7 +8,7 @@ import unittest   # noqa
 class Test_COBS(unittest.TestCase):
     def test_Encode(self):
         # arrange
-        expected = b'\x03\t!\x02,\x01\x00'
+        expected = b'\x03\t!\x02,\x01'
         p = Packet(HWEvent.HELLO, 33, 44)
 
         # act

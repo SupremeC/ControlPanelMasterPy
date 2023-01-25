@@ -1,5 +1,32 @@
 #!/usr/bin/env python
 
+"""
+ControlPanel Daemon. Runs in the background.
+Opens a connection to ArduinoMega via SerialUSB.
+
+
+Commands:
+=================================
+# controlPanelDaemon.py start
+# controlPanelDaemon.py stop
+# controlPanelDaemon.py restart
+
+
+Writes to:
+=================================
+# /tmp/daemon-controlpanel.pid
+# ./logs.log
+
+
+Related links:
+=================================
+# https://github.com/bakercp/PacketSerial
+# https://pythonhosted.org/cobs/
+
+
+"""
+
+
 import sys
 import time
 import logging
@@ -22,7 +49,7 @@ class MyDaemon(Daemon):
         self._controlPanel.start()
         logger.debug("Daemon run.init complete")
         while not self.kill_now:
-            self._controlPanel.update()
+            self._controlPanel.process()
             time.sleep(1)
         logger.debug("exiting run() method")
 
@@ -30,7 +57,6 @@ class MyDaemon(Daemon):
         logger.info("cleanup.Process ID:" + str(os.getpid()))
         logger.info("Cleaning up because %s(%d) was received", signame, signum)
         self._controlPanel.stop()
-        # super().stop()  # Stop the daemon process and remove PID file
 
 
 if __name__ == "__main__":

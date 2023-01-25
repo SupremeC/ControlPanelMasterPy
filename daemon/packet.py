@@ -49,6 +49,16 @@ class Packet:
             length=2, byteorder='little', signed=False))
         return bytes(ba)
 
+    def __str__(self):
+        format("HWEvent: %s(%d)" /
+               "Target: %s" /
+               "Error: %s(%d)" /
+               "Val: %s",
+               self.hwEvent.name, self.hwEvent.value,
+               self.target,
+               self.error.name, self.error.value,
+               self.val)
+
 
 # @verify(UNIQUE)
 class HWEvent  (IntEnum):
@@ -83,3 +93,4 @@ class ErrorType (IntEnum):
 class BlinkTarget (IntEnum):
     AUDIO_PRESETBTNS = 200
     SPEAKER_LEDS = 201
+
