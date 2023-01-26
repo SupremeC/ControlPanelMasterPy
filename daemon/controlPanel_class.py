@@ -1,7 +1,18 @@
 #!/usr/bin/env python
 
-# import sys
-# import os
+# TODO!
+#############################
+# new Flag: InRecordingMode: bool
+#   - Assign new Audio when B1-10 is pressed
+# Cache and play Sound
+# Record Audio to mem/file
+# Apply Audio effects from Pedalboard
+# Play "click on HwSwitch event?"`
+# Control LED Strip(s) via Serial or over WiFi
+# Do logger create new logfiles every day. Rotation?
+
+
+
 from typing import List
 import datetime
 import logging
@@ -70,7 +81,7 @@ class ControlPanel:
         try:
             if(packet.hwEvent == HWEvent.BOOTMEGA):
                 logger.info("Received BOOTMEGA packet. Mega was (re)booted")
-                # TODO - Do Reset routine
+                self.reset()
                 # send/return from this func RequestStatus packet to get current status
                 self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
                 pass
@@ -79,7 +90,7 @@ class ControlPanel:
                 return None
             elif(packet.hwEvent == HWEvent.RESET):
                 logger.info("Received RESET packet. starting reset routine")
-                # TODO - Do Reset routine
+                self.reset()
                 # send/return from this func RequestStatus packet to get current status
                 self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
                 pass
@@ -150,10 +161,11 @@ class ControlPanel:
         for p in packets:
             self._packet_sendqueue.put(p, block, timeout)
 
-    def time_to_send_hello(self):
+    def time_to_send_hello(self) -> bool:
         """ Is it time to send hello yet?"""
         if (self._lastSentHello is None or
-                (datetime.datetime.now() - self._lastSentHello).total_seconds() > SEND_HELLO_INTERVALL):
+                (datetime.datetime.now() - self._lastSentHello)
+                    .total_seconds() > SEND_HELLO_INTERVALL):
             return True
         else:
             return False
