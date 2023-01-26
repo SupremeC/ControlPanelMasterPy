@@ -74,6 +74,19 @@ class Test_PacketContructor(unittest.TestCase):
         self.assertEqual(b[1], 42)
         self.assertEqual(int.from_bytes(b[-2:], byteorder='little'), 1000)
 
+    def test_PrintRepr(self):
+        # arrange
+        p = Packet(HWEvent.HELLO, 42, 1000)
+        p.error = ErrorType.FAILEDTOPARSEPACKET
+
+        # act
+        actual_packet_repr = str(p)
+
+        # assert
+        self.assertTrue(actual_packet_repr.startswith("Packet("))
+        self.assertTrue("target" in actual_packet_repr)
+        self.assertTrue(len(actual_packet_repr) > 30)
+
 
 if __name__ == '__main__':
     unittest.main()

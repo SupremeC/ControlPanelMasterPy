@@ -110,7 +110,9 @@ class PacketSerial:
         while not self._sshutdown_flag.is_set():
             if(self._send_queue.qsize() > 0):
                 try:
-                    self.__send_packet(self._send_queue.get_nowait(block=False))
+                    packet = self._send_queue.get_nowait(block=False)
+                    if packet != None:
+                        self.__send_packet()
                 except Empty:
                     pass
                 except Exception as e:

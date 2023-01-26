@@ -8,6 +8,7 @@ import logging
 from queue import Queue, Full, Empty
 from daemon.packetSerial import PacketSerial
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
+from daemon.auxClass import AuxCtrls, Aux
 
 
 logger = logging.getLogger('daemon.ctrlPanel')
@@ -20,16 +21,17 @@ SEND_HELLO_INTERVALL = 30  # seconds
 
 class ControlPanel:
     def __init__(self):
-        self._lastSentHello = None
-        self._lastReceivedHello = None
-        self._mainInputsOn = False
-        self._mainLedsOn = False
-        self._mainaudioOn = False
-        self._mainMasterOn = bool(False)
-        self._mainDemo = int(0)
-        self._packet_sendqueue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
-        self._packet_receivedqueue = Queue()
-        self._pserial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
+        self._lastSentHello: datetime.datetime = None
+        self._lastReceivedHello: datetime.datetime = None
+        self._mainInputsOn: bool = False
+        self._mainLedsOn: bool = False
+        self._mainaudioOn: bool = False
+        self._mainMasterOn: bool = False
+        self._mainDemo: int = 0
+        self._aux: AuxCtrls = AuxCtrls()
+        self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
+        self._packet_receivedqueue: Queue = Queue()
+        self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
         logger.info("ControlPanel init. Using serial Port=" + self._pserial.port)
 
     def start(self):
@@ -53,11 +55,11 @@ class ControlPanel:
 
     def process(self) -> None:
         ''' Call this method regularly to process packets'''
-        self.process_packets()
+        self._process_packets()
         if self.time_to_send_hello():
             self._pserial.send_hello()
 
-    def process_packets(self) -> None:
+    def _process_packets(self) -> None:
         try:
             while(self._packet_receivedqueue.qsize > 0):
                 self.__act(self._packet_receivedqueue.get(block=True, timeout=2))
@@ -87,7 +89,7 @@ class ControlPanel:
                 pass
             elif(packet.hwEvent == HWEvent.SWITCH):
                 # A switch has changed status. React
-                self.switchStatusChanged(packet)
+                self._switchStatusChanged(packet)
                 pass
             elif(packet.hwEvent == HWEvent.UNDEFINED):
                 logger.error("Recevied undefined package: %s", packet)
@@ -95,7 +97,7 @@ class ControlPanel:
         except Full:
             pass
     
-    def switchStatusChanged(self, packet: Packet) -> Packet:
+    def _switchStatusChanged(self, packet: Packet) -> Packet:
         '''Handles button logic'''
         if packet.target == 12:  # MainSwitch
             self.shutdownPanel(packet.val)
@@ -117,20 +119,36 @@ class ControlPanel:
         if packet.target == 27:
             self._record_audio(packet)
         if packet.target >=28 and packet.target <= 31:
-            self.set_relays(packet)
+            self._set_relays(packet)
         if packet.target >=32 and packet.target <= 37:
             self.ledstripControl(packet)
+        if packet.target >=38 and packet.target <= 41:
+            self._set_relays(packet, safetyctrl = True)
         if packet.target >=101 and packet.target <= 108:
             # analog controls adds '100' to pinnr
             self.ledstripControl(packet)
-        if packet.target >=38 and packet.target <= 41:
-            self.set_relays(packet)
+        if packet.target == 109:
+            self._setVolume(packet)
+        
+    def _set_relays(self, packet: Packet, safetyctrl: bool):
+        try:
+            if safetyctrl:
+                ctrl = self._aux.get_auxctrl(packet.target)
+                self.sendPackets(ctrl.set_state(bool(packet.val)))
+            else:
+                slave = self._aux.get_slavectrl(packet.target)
+                self.sendPackets(slave.set_Slstate(bool(packet.val)))
+        except Exception as e:
+            logger.error(e)
 
-    def set_relays(self, packet : Packet):
         # IF ControlSwitch=ON, set relay!
         # relayPin = packet.target + 16
         # self._packet_sendqueue.put(Packet(HWEvent.SWITCH, relayPin, packet.val))
         raise Exception()
+
+    def sendPackets(self, packets: List, block: bool = False, timeout: float = None) -> None:
+        for p in packets:
+            self._packet_sendqueue.put(p, block, timeout)
 
     def time_to_send_hello(self):
         """ Is it time to send hello yet?"""
@@ -140,31 +158,9 @@ class ControlPanel:
         else:
             return False
 
-"""
-self._mainInputsOn = False
-self._mainLedsOn = False
-self._mainaudioOn = False
-self._mainMasterOn = False
-self.mainDemo = 0
+    def reset(self):
+        self._aux.reset()
 
-HWEVENT:
-UNDEFINED = 0,
-LED = 1
-I2CALED = 2
-I2CBLED = 3
-I2CCLED = 4
-SWITCH = 5
-DEMO = 6
-BLINK = 7  # remember to turn OFF LED after Blink (Val == 16)
-STATUS = 8
-HELLO = 9
-RESET = 10
-BOOTMEGA = 11  # A package with this Event is sent when Mega starts up.
-
-BLINKTARGET
-AUDIO_PRESETBTNS = 200
-SPEAKER_LEDS = 201
-"""
 # Button(s) pin,name,section,coordXY
 # LEDS      pin,name,section,coordXY,board,minV,maxV
 #
