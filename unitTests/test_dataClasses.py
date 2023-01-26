@@ -108,12 +108,23 @@ class TestAuxCtrls(unittest.TestCase):
         self.assertEqual(ctrl.pin, 40)
         self.assertEqual(sctrl.slave_pin, 30)
 
+    def test_set_allLeds(self):
+        # arrange
+        a = AuxCtrls()
+
+        # act
+        ps = a.set_allLeds(False)
+        
+        # assert
+        self.assertTrue(len(ps) == 4)
+
     def test_FindCtrl_wrongPinThrowsException(self):
         # arrange
         a = AuxCtrls()
 
         # act & assert
         self.assertRaises(Exception, a.get_auxctrl, 999)
+        ss= 12
 
 
 if __name__ == '__main__':

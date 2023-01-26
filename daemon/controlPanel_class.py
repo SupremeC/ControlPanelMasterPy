@@ -2,6 +2,8 @@
 
 # TODO!
 #############################
+# Map all buttons into lists/aux/ctrl.
+#   - Update Reset with above buttons
 # new Flag: InRecordingMode: bool
 #   - Assign new Audio when B1-10 is pressed
 # Cache and play Sound
@@ -55,11 +57,8 @@ class ControlPanel:
     def stop(self):
         """Closes serial connection and does general cleanup"""
         try:
-            logger.info("ControlPanel stopping. Clearing packet queue...")
-            with self._packet_sendqueue.mutex:
-                self._packet_sendqueue.queue.clear()
-                self._packet_sendqueue.all_tasks_done.notify_all()
-                self._packet_sendqueue.unfinished_tasks = 0
+            logger.info("ControlPanel stopping...")
+            self.reset()
             self._pserial.close_connection()
         except Exception as e:
             logger.error(e)
@@ -111,7 +110,7 @@ class ControlPanel:
     def _switchStatusChanged(self, packet: Packet) -> Packet:
         '''Handles button logic'''
         if packet.target == 12:  # MainSwitch
-            self.shutdownPanel(packet.val)
+            self.set_panelstatus(bool(packet.val))
         if not self._mainMasterOn: return
 
         if packet.target == 15:  # Inputs on / off
@@ -172,6 +171,20 @@ class ControlPanel:
 
     def reset(self):
         self._aux.reset()
+        self.clearPacketQueue()
+
+    def set_panelstatus(self, statusOn: bool):
+        self._mainMasterOn = statusOn
+        if not statusOn:
+            self.sendPackets(self._aux.set_allLeds(False))
+
+
+    def clearPacketQueue(self):
+        with self._packet_sendqueue.mutex:
+            logger.info("clearing packet queue of {}".format(self._packet_sendqueue.qsize))
+            self._packet_sendqueue.queue.clear()
+            self._packet_sendqueue.all_tasks_done.notify_all()
+            self._packet_sendqueue.unfinished_tasks = 0
 
 # Button(s) pin,name,section,coordXY
 # LEDS      pin,name,section,coordXY,board,minV,maxV
