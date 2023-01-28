@@ -19,7 +19,7 @@ import logging
 from queue import Queue, Full, Empty
 from daemon.packetSerial import PacketSerial
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
-from daemon.auxClass import HwCtrls, Hwctrl
+from daemon.ctrlsClass import HwCtrls, Hwctrl
 
 
 logger = logging.getLogger('daemon.ctrlPanel')
@@ -94,7 +94,7 @@ class ControlPanel:
                 pass
             elif(packet.hwEvent == HWEvent.STATUS):
                 # Status packet. Target == Switch pin.
-                # Nothing has changed. Do not trigger switch behaviour
+                self._switchStatusChanged(packet)
                 pass
             elif(packet.hwEvent == HWEvent.SWITCH):
                 # A switch has changed status. React

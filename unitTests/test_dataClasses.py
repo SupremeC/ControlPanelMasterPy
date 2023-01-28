@@ -9,7 +9,7 @@ sys.path[0] = str(Path(sys.path[0]).parent)
 
 from typing import List
 from daemon.packet import Packet, HWEvent, ErrorType   # noqa
-from daemon.auxClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, swOff, swOn, NoLed
+from daemon.ctrlsClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, swOff, swOn, NoLed
 import unittest   # noqa
 
 
@@ -55,6 +55,20 @@ class Test_Hwctrl(unittest.TestCase):
         self.assertTrue(aPackets[0].hwEvent == HWEvent.I2CALED, "HwEvent was wrong")
         self.assertTrue(aPackets[0].target == 8, "Target was wrong")
         self.assertTrue(len(bPackets) <= 0, "nr of packets should be 0")
+
+    def test_invertInt(self):
+        self.assertEqual(Hwctrl._invert_int(2, 0, 10), 8)
+        self.assertEqual(Hwctrl._invert_int(7, 0, 100), 93)
+        self.assertEqual(Hwctrl._invert_int(50, 0, 100), 50)
+        self.assertEqual(Hwctrl._invert_int(0, -10, 10), 0)
+        self.assertEqual(Hwctrl._invert_int(-11, -10, 10), 10) # outside range
+        self.assertEqual(Hwctrl._invert_int(40, -20, 10), -20) # outside range
+
+        # roundTrip
+        a = Hwctrl._invert_int(2, 0, 10)
+        b = Hwctrl._invert_int(a, 0, 10)
+        self.assertEqual(2, b)
+        pass
 
 
 class TestAnalogCtrl(unittest.TestCase):

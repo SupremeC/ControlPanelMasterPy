@@ -13,6 +13,20 @@ PwmMax: int = 4094
 
 @dataclass
 class Hwctrl:
+    '''
+    :param section: Group ctrls together with the same section
+    :param pin: The Arduino.MEGA PinNr. Use '-1' if N.A.
+    :param state: current state of switch
+    :param name: Human friendly name of Ctrl
+    :param ledboard: If the LedPin refers to a pin on PwmBoard, specify that here
+    :param ledPin: The PinNr of the LED. Can be both on Arduino.Mega and PwmBoard
+    :param ledState: current state of LED
+    :param ledonVal: The Value to send as 'ON'
+    :param ledOffVal: The Value to send as 'OFF'
+    :param ledFollowState: If Ctrl.State changes, should LED.State also change
+    :param ledFollowInvert: requires ledFollowState. Inverts the state of Led compared to Ctrl.State
+    :param slaves: Ctrls that is logically bound to this ctrl
+    '''
     section: str
     pin: int = 0
     state: bool = swOff
@@ -23,6 +37,7 @@ class Hwctrl:
     ledonVal: int = 1
     ledOffVal: int = 0
     ledFollowState: bool = True
+    ledFollowInvert: bool = False
     slaves: List = field(default_factory=list)  # List[Hwctrl]
 
     def __eq__(self, other):
@@ -33,10 +48,12 @@ class Hwctrl:
     def set_state(self, new_state: bool) -> List[Packet]:
         '''Set state and returns a packet to turn on ctrl.ledpin'''
         self.state = bool(new_state)
-        return [] if not self.ledFollowState else self.set_led_state(self.state)
+        return [] if not self.ledFollowState else self.set_led_state(self.state, self.ledFollowInvert)
 
-    def set_led_state(self, new_state: bool) -> List[Packet]:
+    def set_led_state(self, new_state: bool, invert: bool = False) -> List[Packet]:
+        '''Uses ledonVal and ledOffVal to set LED value'''
         val = self.ledonVal if new_state else self.ledOffVal
+        if invert: val = self._invert_int(val, self.ledOffVal, self.ledOffVal)
         if self.ledboard != PwmBoard.NONE_ and self.ledPin != NoLed:
             self.ledState = self.state
             return [Packet(self.ledboard, self.ledPin, val)]
@@ -44,6 +61,18 @@ class Hwctrl:
             self.ledState = self.state
             return [Packet(HWEvent.LED, self.ledPin, val)]
         return []
+
+    def _invert_int(val: int, start: int, end: int) -> int:
+        # is range inverted=
+        negstep = start > end
+
+        # clamp value within valid range
+        actualMin = end if negstep else start
+        actualMax = start if negstep else end
+        cVal = max(min(actualMax, val), actualMin)
+
+        newVal = (actualMax - cVal) + start
+        return newVal
 
 
 @dataclass
