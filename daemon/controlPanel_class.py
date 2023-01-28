@@ -2,8 +2,6 @@
 
 # TODO!
 #############################
-# Map all buttons into lists/aux/ctrl.
-#   - Update Reset with above buttons
 # new Flag: InRecordingMode: bool
 #   - Assign new Audio when B1-10 is pressed
 # Cache and play Sound
@@ -21,7 +19,7 @@ import logging
 from queue import Queue, Full, Empty
 from daemon.packetSerial import PacketSerial
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
-from daemon.auxClass import AuxCtrls, Aux
+from daemon.auxClass import HwCtrls, Hwctrl
 
 
 logger = logging.getLogger('daemon.ctrlPanel')
@@ -36,12 +34,13 @@ class ControlPanel:
     def __init__(self):
         self._lastSentHello: datetime.datetime = None
         self._lastReceivedHello: datetime.datetime = None
-        self._mainInputsOn: bool = False
-        self._mainLedsOn: bool = False
-        self._mainaudioOn: bool = False
-        self._mainMasterOn: bool = False
+        self._ctrls: HwCtrls = HwCtrls()
+        self._mainMasterOn: Hwctrl
+        self._mainInputsOn: Hwctrl
+        self._mainaudioOn: Hwctrl
+        self._mainbacklight: Hwctrl
         self._mainDemo: int = 0
-        self._aux: AuxCtrls = AuxCtrls()
+        self._mainRecording: bool = False
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
@@ -111,16 +110,18 @@ class ControlPanel:
         '''Handles button logic'''
         if packet.target == 12:  # MainSwitch
             self.set_panelstatus(bool(packet.val))
-        if not self._mainMasterOn: return
+        if not self._mainMasterOn.state: return
 
         if packet.target == 15:  # Inputs on / off
-            self._mainInputsOn = bool(packet.val)
+            self._mainInputsOn.set_state(bool(packet.val))
+
         if packet.target == 14:  # Backlight
+            self.sendPackets(self._mainbacklight.set_state(bool(packet.val)))
             # TODO - turn off btn LEDs also?
-            self._packet_sendqueue.put(Packet(HWEvent.SWITCH, 43, packet.val))
         if packet.target == 16:  # Sound on / off
-            self._mainaudioOn = bool(packet.val)
-        if not self._mainInputsOn: return
+            self._mainaudioOn.state = bool(packet.val)
+
+        if not self._mainInputsOn.state: return
 
         if packet.target >= 2 and packet.target <= 11:
             self.playSound(packet)
@@ -140,14 +141,14 @@ class ControlPanel:
         if packet.target == 109:
             self._setVolume(packet)
         
-    def _set_relays(self, packet: Packet, safetyctrl: bool):
+    def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
             if safetyctrl:
-                ctrl = self._aux.get_auxctrl(packet.target)
+                ctrl = self._ctrls.get_ctrl(packet.target)
                 self.sendPackets(ctrl.set_state(bool(packet.val)))
             else:
-                slave = self._aux.get_slavectrl(packet.target)
-                self.sendPackets(slave.set_Slstate(bool(packet.val)))
+                slave = self._ctrls.get_slavectrl(packet.target)
+                self.sendPackets(slave.set_state(bool(packet.val)))
         except Exception as e:
             logger.error(e)
 
@@ -170,13 +171,16 @@ class ControlPanel:
             return False
 
     def reset(self):
-        self._aux.reset()
+        self._ctrls.reset()
         self.clearPacketQueue()
+        self._mainMasterOn: Hwctrl = self._ctrls.get_ctrl(12)
+        self._mainInputsOn: Hwctrl = self._ctrls.get_ctrl(15)
+        self._mainaudioOn: Hwctrl = self._ctrls.get_ctrl(16)
 
-    def set_panelstatus(self, statusOn: bool):
-        self._mainMasterOn = statusOn
-        if not statusOn:
-            self.sendPackets(self._aux.set_allLeds(False))
+    def set_panelstatus(self, state: bool):
+        self._mainMasterOn.state = state
+        if not state:
+            self.sendPackets(self._ctrls.set_allLeds(False))
 
 
     def clearPacketQueue(self):
