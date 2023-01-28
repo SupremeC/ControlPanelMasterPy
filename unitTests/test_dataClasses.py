@@ -9,16 +9,16 @@ sys.path[0] = str(Path(sys.path[0]).parent)
 
 from typing import List
 from daemon.packet import Packet, HWEvent, ErrorType   # noqa
-from daemon.auxClass import Analogctrl, Aux, AuxCtrls, Hwctrl, PwmBoard, swOff, swOn, NoLed
+from daemon.auxClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, swOff, swOn, NoLed
 import unittest   # noqa
 
 
 class Test_Hwctrl(unittest.TestCase):
     def test_compare(self):
         # act
-        a = Hwctrl(pin=2, state= swOn)
-        b = Hwctrl(pin=2, state= swOff)
-        c = Hwctrl(pin=3, state= swOn)
+        a = Hwctrl(pin=2, state= swOn, section="test")
+        b = Hwctrl(pin=2, state= swOff, section="test")
+        c = Hwctrl(pin=3, state= swOn, section="test")
 
         # assert
         self.assertEqual(a, b)
@@ -26,9 +26,9 @@ class Test_Hwctrl(unittest.TestCase):
 
     def test_state(self):
         # act
-        a = Hwctrl(pin=2, state= swOn)
-        b = Hwctrl(pin=2, state= bool(0))
-        c = Hwctrl(pin=2, state= swOff)
+        a = Hwctrl(pin=2, state= swOn, section="test")
+        b = Hwctrl(pin=2, state= bool(0), section="test")
+        c = Hwctrl(pin=2, state= swOff, section="test")
         c.set_state(44)
 
         # assert
@@ -38,11 +38,11 @@ class Test_Hwctrl(unittest.TestCase):
 
     def test_setState(self):
         # act
-        a = Hwctrl(pin=2, state= swOn, ledboard=PwmBoard.I2CALED, ledPin=8)
+        a = Hwctrl(pin=2, state= swOn, ledboard=PwmBoard.I2CALED, ledPin=8, section="test")
         aPackets = a.set_state(False)
-        b = Hwctrl(pin=2, state= swOff)
+        b = Hwctrl(pin=2, state= swOff, section="test")
         bPackets = b.set_state(True)
-        c = Hwctrl(pin=2, state= swOff)
+        c = Hwctrl(pin=2, state= swOff, section="test")
         cPackets = c.set_state(44)
 
         # assert
@@ -57,30 +57,12 @@ class Test_Hwctrl(unittest.TestCase):
         self.assertTrue(len(bPackets) <= 0, "nr of packets should be 0")
 
 
-class TestAux(unittest.TestCase):
-    def test_setSlaveState(self):
-        # act
-        a = Aux(pin=2, state= swOn, ledboard=PwmBoard.I2CALED, ledPin=8, slave_ledboard=PwmBoard.I2CBLED, slave_ledPin=6)
-        aPackets = a.set_Slstate(False)
-        b = Aux(pin=2, state= swOn, ledboard=PwmBoard.I2CALED, ledPin=8)
-        bPackets = b.set_Slstate(True)
-        # assert
-        self.assertEqual(a.slave_state, False)
-        self.assertEqual(b.slave_state, True)
-
-        # assert return value
-        self.assertTrue(len(aPackets) > 0, "nr of packets was wrong")
-        self.assertTrue(aPackets[0].hwEvent == HWEvent.I2CBLED, "HwEvent was wrong")
-        self.assertTrue(aPackets[0].target == 6, "Target was wrong")
-        self.assertTrue(len(bPackets) <= 0, "nr of packets should be 0")
-
-
 class TestAnalogCtrl(unittest.TestCase):
     def test_setState(self):
         # act
-        a = Analogctrl(pin=2, state=222, ledboard=PwmBoard.I2CCLED, ledPin=8)
+        a = Analogctrl(pin=2, state=222, ledboard=PwmBoard.I2CCLED, ledPin=8, section="test")
         aPackets = a.set_state(3001)
-        b = Analogctrl(pin=3, state= swOn, ledboard=PwmBoard.I2CCLED, ledPin=NoLed)
+        b = Analogctrl(pin=3, state= swOn, ledboard=PwmBoard.I2CCLED, ledPin=NoLed, section="test")
         bPackets = b.set_state(0)
         # assert
         self.assertEqual(a.state, 3001)
@@ -96,35 +78,67 @@ class TestAnalogCtrl(unittest.TestCase):
 class TestAuxCtrls(unittest.TestCase):
     def test_FindCtrl(self):
         # arrange
-        a = AuxCtrls()
+        a = HwCtrls()
 
         # act
-        ctrl = a.get_auxctrl(40)
+        ctrl = a.get_ctrl(40)
         sctrl = a.get_slavectrl(30)
         
         # assert
         self.assertTrue(len(a.ctrls) > 3)
-        self.assertIs(ctrl, sctrl)
+        self.assertTrue(ctrl)
+        self.assertTrue(sctrl)
         self.assertEqual(ctrl.pin, 40)
-        self.assertEqual(sctrl.slave_pin, 30)
+        self.assertEqual(sctrl.pin, 30)
 
     def test_set_allLeds(self):
         # arrange
-        a = AuxCtrls()
+        a = HwCtrls()
+        ctrls_flatList = a._getAllCtrls_flat()
 
         # act
         ps = a.set_allLeds(False)
         
         # assert
-        self.assertTrue(len(ps) == 4)
+        self.assertTrue(len(ps) > 20)
+
+    def test_AssertUniquePins(self):
+        # arrange & act
+        a = HwCtrls()
+        ctrls = a._getAllCtrls_flat()
+
+        # assert by adding into Dict. Duplicate values will throw exception
+        d = dict()
+        for ctrl in ctrls:
+            if ctrl.pin != -1:
+                dictKey = "pin="+str(ctrl.pin)
+                if dictKey in d:
+                    raise Exception("Pin already exists")
+                d[dictKey] = "pin"
+
+            if ctrl.ledboard == PwmBoard.NONE_ and ctrl.ledPin != NoLed:
+                dictKey = "pin="+str(ctrl.ledPin)
+                if dictKey in d:
+                    raise Exception("LPin already exists")
+                d[dictKey] = "ledPin"
+            elif ctrl.ledboard != PwmBoard.NONE_ and ctrl.ledPin != NoLed:
+                dictKey = "board="+str(ctrl.ledboard)+", pin="+str(ctrl.ledPin)
+                if dictKey in d:
+                    raise Exception("Pwm.LedPin already exists.\rExisting->" + str(d[dictKey]) +"\rNew->" + str(ctrl))
+                d[dictKey] = ctrl
+        pass
+
 
     def test_FindCtrl_wrongPinThrowsException(self):
         # arrange
-        a = AuxCtrls()
+        a = HwCtrls()
 
         # act & assert
-        self.assertRaises(Exception, a.get_auxctrl, 999)
+        self.assertRaises(Exception, a.get_ctrl, 999)
         ss= 12
+
+    def helper_filterCtrls():
+        pass
 
 
 if __name__ == '__main__':
