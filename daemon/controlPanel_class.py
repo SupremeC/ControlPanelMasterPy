@@ -43,9 +43,7 @@ class ControlPanel:
         self._mainRecording: bool = False
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
-
-        sw = SlidingWindow(capacity=30, time_unit=.05)
-        self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue, sw)
+        self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
         logger.info("ControlPanel init. Using serial Port=" + self._pserial.port)
 
     def start(self):

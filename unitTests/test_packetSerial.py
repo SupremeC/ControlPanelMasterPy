@@ -16,9 +16,8 @@ class Test_Threading(unittest.TestCase):
         # arrange
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        sw = SlidingWindow(30, .05)
         ps = daemon.packetSerial.PacketSerial(
-            self._packet_receivedqueue, self._packet_sendqueue, sw)
+            self._packet_receivedqueue, self._packet_sendqueue)
 
         # act
         ps.open_connection()
@@ -40,9 +39,8 @@ class Test_Threading(unittest.TestCase):
         # arrange
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        sw = SlidingWindow(30, .05)
         ps = daemon.packetSerial.PacketSerial(
-            self._packet_receivedqueue, self._packet_sendqueue, sw)
+            self._packet_receivedqueue, self._packet_sendqueue)
 
         # act
         port = ps.find_arduino()

@@ -27,7 +27,7 @@ class PacketSerial:
     def is_conn_open(self):
         return False if self._ser is None else self._ser.is_open
 
-    def __init__(self, rqueue: Queue, squeue: Queue, pthrottle: SlidingWindow):
+    def __init__(self, rqueue: Queue, squeue: Queue):
         self._port = self.find_arduino()
         self._ser = None
         self._received_queue = rqueue
@@ -36,7 +36,11 @@ class PacketSerial:
         self._sshutdown_flag = threading.Event()
         self._readserial_thread = None
         self._writeserial_thread = None
-        self.throttle: SlidingWindow = pthrottle
+        self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
+
+    def set_rate_limit(self, nr_of_packets:int, ptime_unit: float):
+        self.throttle.capacity = nr_of_packets
+        self.throttle.time_unit = ptime_unit
 
     def find_arduino(self) -> str:
         """Get the name of the port that is connected to Arduino."""
