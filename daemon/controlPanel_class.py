@@ -20,7 +20,7 @@ from queue import Queue, Full, Empty
 from daemon.packetSerial import PacketSerial
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
 from daemon.ctrlsClass import HwCtrls, Hwctrl
-
+from daemon.slidingWindowClass import SlidingWindow
 
 logger = logging.getLogger('daemon.ctrlPanel')
 # The buffer of Arduino is increased to 256 bytes (if it works)
@@ -43,7 +43,9 @@ class ControlPanel:
         self._mainRecording: bool = False
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
-        self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
+
+        sw = SlidingWindow(capacity=30, time_unit=.05)
+        self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue, sw)
         logger.info("ControlPanel init. Using serial Port=" + self._pserial.port)
 
     def start(self):

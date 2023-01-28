@@ -8,8 +8,8 @@ from cobs import cobs  # noqa
 from daemon import packet
 from queue import Queue, Empty, Full
 import time
-import signal
 import threading
+from daemon.slidingWindowClass import SlidingWindow
 
 
 logger = logging.getLogger('daemon.PacketSerial')
@@ -27,7 +27,7 @@ class PacketSerial:
     def is_conn_open(self):
         return False if self._ser is None else self._ser.is_open
 
-    def __init__(self, rqueue: Queue, squeue: Queue):
+    def __init__(self, rqueue: Queue, squeue: Queue, pthrottle: SlidingWindow):
         self._port = self.find_arduino()
         self._ser = None
         self._received_queue = rqueue
@@ -36,9 +36,11 @@ class PacketSerial:
         self._sshutdown_flag = threading.Event()
         self._readserial_thread = None
         self._writeserial_thread = None
+        self.throttle: SlidingWindow = pthrottle
 
     def find_arduino(self) -> str:
         """Get the name of the port that is connected to Arduino."""
+        port = "ErrorPS.01: Arduino not found"
         ports = serial.tools.list_ports.comports()
         for p in ports:
             logger.info(
@@ -109,6 +111,9 @@ class PacketSerial:
     def start_write_packets(self) -> None:
         while not self._sshutdown_flag.is_set():
             if(self._send_queue.qsize() > 0):
+                if not self.throttle.ok_to_send():
+                    time.sleep(self.throttle.time_unit *.4)
+                    continue
                 try:
                     packet = self._send_queue.get_nowait(block=False)
                     if packet != None:
@@ -116,6 +121,7 @@ class PacketSerial:
                 except Empty:
                     pass
                 except Exception as e:
+                    logger.error("Failed to send packet. Error as follows...")
                     logger.error(e)
             else:
                 time.sleep(0.05)

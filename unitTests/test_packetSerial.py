@@ -7,6 +7,7 @@ from daemon.packet import Packet, HWEvent, ErrorType # noqa
 import unittest   # noqa
 from datetime import datetime, timedelta
 import time
+from daemon.slidingWindowClass import SlidingWindow
 
 
 
@@ -15,7 +16,9 @@ class Test_Threading(unittest.TestCase):
         # arrange
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        ps = daemon.packetSerial.PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
+        sw = SlidingWindow(30, .05)
+        ps = daemon.packetSerial.PacketSerial(
+            self._packet_receivedqueue, self._packet_sendqueue, sw)
 
         # act
         ps.open_connection()
@@ -37,13 +40,16 @@ class Test_Threading(unittest.TestCase):
         # arrange
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        ps = daemon.packetSerial.PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)
+        sw = SlidingWindow(30, .05)
+        ps = daemon.packetSerial.PacketSerial(
+            self._packet_receivedqueue, self._packet_sendqueue, sw)
 
         # act
         port = ps.find_arduino()
 
         # assert
         self.assertIsNotNone(port, "Port is not found")
+        self.assertFalse("error" in port)
 
 
 if __name__ == '__main__':
