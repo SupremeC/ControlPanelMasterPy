@@ -19,6 +19,16 @@ git config --global user.name "David Berglund"
 # Audio effects
 pip install pedalboard
 
+# Audio playback and mic recording
+python3 -m pip install sounddevice
+pip install soundfile
+pip install librosa #pitch and strectch
+sudo apt-get install python3-numpy
+sudo apt-get install libportaudio2
+pip install scipy
+amixer set Master 95%
+amixer set Capture 100%
+
 # reconnect wifi on lost connection (beware of win chars)
 # https://gist.github.com/carry0987/372b9fefdd8041d0374f4e08fbf052b1
 # dos2unix wifi-reconnect.sh
