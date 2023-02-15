@@ -1,16 +1,32 @@
 #!/usr/bin/env python
 
-# TODO!
+# TODO Global!
 #############################
-# Librosa is too damn slow!!!!
-# - Try Pydub, seems to support pitch, timecompress
-# - y_stretch = pyrb.time_stretch(y, sr, 0.75)
-# - y_shift = pyrb.pitch_shift(y, sr, 0.75)
+# Move one ledstrip to ceiling lamp?
+# Bedlamp - which one?
+# Bedlamp - support dimming? How?
+# Add USB socket to drawing
+# Add text to effect btns?
+
+
+# TODO MasterPY!
+#############################
 # Cache and play Sound
-# Apply Audio effects from Pedalboard
+#  - Stop playback of clip when new Clip plays
+#  - Stop Playback of clip when recording
+#  - Stop temp-playback when applying effect
+#  - Stop temp-playback when existing clip starts to play
 # Play "click on HwSwitch event?"`
+# Play "workingOnIt" when Applying effect?
 # Control LED Strip(s) via Serial or over WiFi
 
+
+# TODO MEGA!
+#############################
+# ButtonClass jled  and jled-pca9685-hal
+# analog btn handler & conversion
+# analog "+100" ID support
+# 
 
 
 from typing import List
@@ -140,7 +156,7 @@ class ControlPanel:
             self.ledstripControl(packet)
         if packet.target == 109:
             self._setVolume(packet)
-        
+
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
             if safetyctrl:
