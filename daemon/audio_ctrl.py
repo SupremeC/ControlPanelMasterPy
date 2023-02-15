@@ -1,5 +1,7 @@
 from pathlib import Path
-import shutil
+from typing import Callable
+import os
+import shortuuid
 import logging
 import threading
 from daemon.audio_rec import AudioRec
@@ -13,15 +15,15 @@ class AudioCtrl:
     __rootdir: Path
     __tempdir: Path
     __storagedir: Path
-    __effects_running: bool
+    effects_running: bool
     current_filepath: str
     max_rectime_seconds: int
     rec_ctrl: AudioRec
     effect_ctrl: AudioEffect
 
     def __init__(self):
-        self.__effects_running: bool = False
-        self.__rootdir = Path.cwd()
+        self.effects_running: bool = False
+        self.__rootdir = Path(os.path.realpath(__file__)).parent
         self.__tempdir = self.__rootdir / "tmp_rec"
         self.__storagedir = self.__rootdir / "sounds"
         self.current_filepath = None
@@ -33,9 +35,12 @@ class AudioCtrl:
 
     def start_recording(self) -> bool:
         '''Returns immediately. Recording is done in a new thread.
-        Records until StopRecording is called or 30(DEFAULT) seconds has passed.'''
+        Records until StopRecording is called or 30(DEFAULT) seconds has passed.
+        
+        :Return: bool: True if recording started, False otherwise
+        '''
         self.current_filepath = None
-        AudioCtrl.__remove_files_in_dir(self.__tempdir.absolute)
+        AudioCtrl.__remove_files_in_dir(self.__tempdir)
         return self.rec_ctrl.rec()
     
     def is_recording(self) -> bool:
@@ -47,21 +52,26 @@ class AudioCtrl:
         self.rec_ctrl.stop()
         self.current_filepath = self.rec_ctrl.rec_filename
 
-    def apply_effect(self, p_effect: EffectType) -> None:
-        if self.__effects_running:
+    def apply_effect(self, p_effect: EffectType, p_callback: Callable[[str], None] = None) -> bool:
+        '''Returns immediately. Effect processing is done in a new thread.
+        :Return: bool: True if effectProcessing started, False otherwise
+        '''
+        if self.effects_running:
             logger.warn("An effect is already being applied. NOOP")
-            return
+            return False
         if self.current_filepath is None:
             logger.error("Could not apply effect to audio because sound not defined")
-            return
+            return False
         effectthread = threading.Thread(
             target=self.__wrapped_apply_effect,
             kwargs=dict(
                 infile=self.current_filepath,
                 effect=p_effect,
+                callback=p_callback
             ),
         )
         effectthread.start()
+        return True
 
     def abort(self) -> None:
         if self.is_recording(): self.stop_recording()
@@ -80,15 +90,20 @@ class AudioCtrl:
         else:
             logger.error("Could not assign audio to Btn because sound does not exist")
 
-    def __wrapped_apply_effect(self, infile, effect) -> None:
-        self.__effects_running = True
-        self.current_filepath = self.effect_ctrl.do_effect(infile, effect)
-        AudioCtrl.__effect_on_done()
+    def __wrapped_apply_effect(self, infile, effect, callback: Callable[[str], None] = None) -> None:
+        self.effects_running = True
+        outfile = str(self.__build_tmp_filename(prefix="tmp_effect"))
+        self.current_filepath = self.effect_ctrl.do_effect(infile, effect, outfile)
+        self.__effect_on_done()
+        if callback is not None:
+            callback(self.current_filepath)
 
     def __effect_on_done(self) -> None:
-        self.__effects_running = False
+        self.effects_running = False
 
-    
+    def __build_tmp_filename(self, prefix):
+        return Path(self.__tempdir, f"{prefix}_{shortuuid.uuid()}.wav")
+
     def file_exist(filepath: str) -> bool:
         return Path(filepath).exists()
     

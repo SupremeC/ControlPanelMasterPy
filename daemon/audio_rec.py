@@ -40,12 +40,13 @@ class AudioRec():
         :param dir: The directory to save the recorded .wave file to
         '''
         self.recording = False
+        self.recordingstart = None
         self.previously_recording = False
         self.audio_q = queue.Queue()
         self.metering_q = queue.Queue(maxsize=1)
         self.peak = 0
         self.device_ID = 10 # default device
-        max_rec_time = 30  # in seconds
+        self.max_rec_time = 30  # in seconds
 
         self.__dir = dir
         self.__create_dir(path = self.__dir)
@@ -83,9 +84,10 @@ class AudioRec():
 
     def stop(self, *args):
         '''Stops recording process. Might take a while (blocking)...'''
-        self.stream.stop()
-        self._wait_for_thread()
-        self.recording = False
+        self.recording = False # important!
+        if self.stream is not None: 
+            self.stream.stop()
+            self._wait_for_thread()
 
     def set_device(self, dev_id: int) -> None:
         '''Set the Device ID. Use list_hostapis() and list_devices()
@@ -122,7 +124,7 @@ class AudioRec():
         with sf.SoundFile(**soundfile_args) as f:
             while True:
                 data = q.get()
-                if data is None or  time.time() - self.recordingstart > self.max_rec_time:
+                if data is None or time.time() - self.recordingstart > self.max_rec_time:
                     self.recording = False
                     break
                 f.write(data)
@@ -162,7 +164,8 @@ class AudioRec():
 
     def _wait_for_thread(self):
         '''blocking'''
-        self.thread.join()
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join()
 
     def __del__(self):
         self.stop()

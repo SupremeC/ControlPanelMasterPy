@@ -1,20 +1,46 @@
 # from pedalboard import Pedalboard
-import pedalboard
+"""import pedalboard
 from pedalboard import Pedalboard, Chorus, Delay
 from pedalboard import Plugin, Reverb, Compressor, Gain
-from pedalboard import Phaser, LadderFilter
-from pedalboard.io import AudioFile
+from pedalboard import Phaser, LadderFilter, Bitcrush, Distortion
+from pedalboard.io import AudioFile"""
 import wave
-
-
-import wave
-import numpy as np
-
+import time
+import soundfile as sf
+from pydub import AudioSegment
+import pyrubberband as pyrb
 
 input_filename = "/home/pi/Source/ControlPanelMasterPy/ControlPanelMasterPy/playground/maleVoice_28s.wav"
 output_filename = "/home/pi/Source/ControlPanelMasterPy/ControlPanelMasterPy/playground/output.wav"
 
-def reverse_wave(input_filename, output_filename):
+
+y, sr = sf.read(input_filename)
+"""
+# Play back at extra low speed
+yw = pyrb.time_stretch(y, sr, 0.5)
+# Play back at low tones
+yw = pyrb.pitch_shift(y, sr, -3)
+# Play back at 1.5X speed
+yw = pyrb.time_stretch(y, sr, 1.5)
+# Play back two 3x tones
+yw = pyrb.pitch_shift(y, sr, 3)
+"""
+
+tstart = time.time()
+
+
+yw = pyrb.pitch_shift(y, sr, 3)
+
+tend = time.time()
+print(str(tend-tstart))
+
+
+sf.write(output_filename, yw, sr, format='wav')
+
+exit(1)
+
+
+"""def reverse_wave(input_filename, output_filename):
     with wave.open(input_filename, "rb") as input_wave:
         # Read the wave file
         samples = np.frombuffer(input_wave.readframes(input_wave.getnframes()), dtype=np.int16)
@@ -32,7 +58,7 @@ def reverse_wave(input_filename, output_filename):
 
 reverse_wave(input_filename, output_filename)
 exit(0)
-
+"""
 # Make a Pedalboard object, containing multiple audio plugins:
 """ board = Pedalboard([
     Compressor(threshold_db=-50, ratio=25),
@@ -44,13 +70,24 @@ exit(0)
 ])
 """
 
+
+
 # Chorus - digital, raspi effect with slight echo
+# board = Pedalboard([Chorus(), Reverb(room_size=0.25)])
 # Reverb - heavy echo
+
 # Phaser -  slightly mushy, dragged out 
+# board = Pedalboard([Phaser(feedback=0, depth=.8, rate_hz=1.2, mix=.7)])
+
 # LadderFilter(mode=LadderFilter.Mode.HPF12, cutoff_hz=300)  - light thin speech
 # board = Pedalboard([Chorus(), Reverb(room_size=0.25)])
-board = Pedalboard([Phaser(feedback=0, depth=.8, rate_hz=1.2, mix=.7)])
-# board = Pedalboard([LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=600)])
+# board = Pedalboard([Phaser(feedback=0, depth=.8, rate_hz=1.2, mix=.7)])
+"""board = Pedalboard([
+    LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=500,  resonance=0.75), 
+    Gain(gain_db=10),
+    Bitcrush(5),
+    Distortion(26), Gain(gain_db=-22)
+    ])
 
 try:
     # Open an audio file for reading, just like a regular file:
@@ -72,4 +109,4 @@ try:
                 o.flush()
     a = 434
 except Exception as e:
-    print(str(e))
+    print(str(e))"""

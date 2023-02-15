@@ -15,7 +15,6 @@ class Test_SlidingWindow(unittest.TestCase):
     fractions of Seconds when calling time()
 
     I doubt this test actually works as intended.
-    TODO
     '''
     packets_to_send: int = 100
     packets_per_window: int = 30

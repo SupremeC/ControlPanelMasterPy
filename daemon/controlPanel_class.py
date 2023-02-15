@@ -2,14 +2,14 @@
 
 # TODO!
 #############################
-# new Flag: InRecordingMode: bool
-#   - Assign new Audio when B1-10 is pressed
+# Librosa is too damn slow!!!!
+# - Try Pydub, seems to support pitch, timecompress
+# - y_stretch = pyrb.time_stretch(y, sr, 0.75)
+# - y_shift = pyrb.pitch_shift(y, sr, 0.75)
 # Cache and play Sound
-# Record Audio to mem/file
 # Apply Audio effects from Pedalboard
 # Play "click on HwSwitch event?"`
 # Control LED Strip(s) via Serial or over WiFi
-# Do logger create new logfiles every day. Rotation?
 
 
 

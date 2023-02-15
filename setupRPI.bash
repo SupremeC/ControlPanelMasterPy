@@ -18,11 +18,13 @@ git config --global user.name "David Berglund"
 
 # Audio effects
 pip install pedalboard
+pip install AudioSegment
+pip install PYRubberBand
 
 # Audio playback and mic recording
 python3 -m pip install sounddevice
 pip install soundfile
-pip install librosa #pitch and strectch
+pip install shortuuid
 sudo apt-get install python3-numpy
 sudo apt-get install libportaudio2
 pip install scipy
