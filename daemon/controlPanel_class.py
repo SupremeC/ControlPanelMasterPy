@@ -7,6 +7,7 @@
 # Bedlamp - support dimming? How?
 # Add USB socket to drawing
 # Add text to effect btns?
+# How to restore (btn)state when either Mega or Mastery reboots?
 
 
 # TODO MasterPY!
@@ -96,8 +97,6 @@ class ControlPanel:
             if(packet.hwEvent == HWEvent.BOOTMEGA):
                 logger.info("Received BOOTMEGA packet. Mega was (re)booted")
                 self.reset()
-                # send/return from this func RequestStatus packet to get current status
-                self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
                 pass
             elif(packet.hwEvent == HWEvent.HELLO):
                 self._lastReceivedHello = datetime.datetime.now()
@@ -105,12 +104,10 @@ class ControlPanel:
             elif(packet.hwEvent == HWEvent.RESET):
                 logger.info("Received RESET packet. starting reset routine")
                 self.reset()
-                # send/return from this func RequestStatus packet to get current status
-                self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
                 pass
             elif(packet.hwEvent == HWEvent.STATUS):
                 # Status packet. Target == Switch pin.
-                self._switchStatusChanged(packet)
+                self._set_status_no_action(packet)
                 pass
             elif(packet.hwEvent == HWEvent.SWITCH):
                 # A switch has changed status. React
@@ -130,10 +127,9 @@ class ControlPanel:
 
         if packet.target == 15:  # Inputs on / off
             self._mainInputsOn.set_state(bool(packet.val))
-
         if packet.target == 14:  # Backlight
             self.sendPackets(self._mainbacklight.set_state(bool(packet.val)))
-            # TODO - turn off btn LEDs also?
+            # TODO - turn off btn LEDs also? YES!
         if packet.target == 16:  # Sound on / off
             self._mainaudioOn.state = bool(packet.val)
 
@@ -160,11 +156,13 @@ class ControlPanel:
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
             if safetyctrl:
-                ctrl = self._ctrls.get_ctrl(packet.target)
-                self.sendPackets(ctrl.set_state(bool(packet.val)))
+                # turn on slave ctrls (LEDs)
+                relayctrl = self._ctrls.get_ctrl(packet.target)
+                self.sendPackets(relayctrl.set_state(bool(packet.val)))
             else:
-                slave = self._ctrls.get_slavectrl(packet.target)
-                self.sendPackets(slave.set_state(bool(packet.val)))
+                # activate actual RELAY output
+                slavectrl = self._ctrls.get_slavectrl(packet.target)
+                self.sendPackets(slavectrl.set_state(bool(packet.val)))
         except Exception as e:
             logger.error(e)
 
@@ -174,6 +172,7 @@ class ControlPanel:
         raise Exception()
 
     def sendPackets(self, packets: List, block: bool = False, timeout: float = None) -> None:
+        """ Puts the packet in queue. It will be picked up ASAP by packetSerial thread"""
         for p in packets:
             self._packet_sendqueue.put(p, block, timeout)
 
@@ -192,6 +191,8 @@ class ControlPanel:
         self._mainMasterOn: Hwctrl = self._ctrls.get_ctrl(12)
         self._mainInputsOn: Hwctrl = self._ctrls.get_ctrl(15)
         self._mainaudioOn: Hwctrl = self._ctrls.get_ctrl(16)
+        # send RequestStatus packet to get actual ctrls status
+        self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
 
     def set_panelstatus(self, state: bool):
         self._mainMasterOn.state = state

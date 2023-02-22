@@ -15,11 +15,15 @@ class HWEvent  (IntEnum):
     I2CCLED = 4
     SWITCH = 5
     DEMO = 6
-    BLINK = 7  # remember to turn OFF LED after Blink (Val == 16)
+    BLINK = 7
+    """ Remember to turn OFF LED after Blink (Val == 16) """
     STATUS = 8
+    """ Status report of a ctrl/led/relay. Does this hold up? """
     HELLO = 9
     RESET = 10
-    BOOTMEGA = 11  # A package with this Event is sent when Mega starts up.
+    """ When sent: Ask Mega to do Reboot """
+    BOOTMEGA = 11
+    """ A package with this Event is sent when Mega starts up. """
 
 
 # @verify(UNIQUE)

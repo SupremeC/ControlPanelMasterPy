@@ -6,6 +6,7 @@ import logging
 import threading
 from daemon.audio_rec import AudioRec
 from daemon.audio_effects import AudioEffect, EffectType
+import pygame
 
 
 logger = logging.getLogger('daemon.audioCtrl')
@@ -32,6 +33,27 @@ class AudioCtrl:
         AudioCtrl.__create_dir(self.__storagedir)
         self.rec_ctrl = AudioRec(dir = self.__tempdir)
         self.effect_ctrl = AudioEffect()
+        # init() channels refers to mono vs stereo, not playback Channel object
+        pygame.mixer.init(size = -16, channels = 1, buffer = 2**12)
+        pygame.mixer.set_num_channels(8)
+        pygame.mixer.set_reserved(1)
+        self.channelClip =  pygame.mixer.Channel(0)
+
+    def bckgrnd_play(self) -> None:
+        chnl = pygame.mixer.findChannel()
+        chnl.play(mySound, loops=0)
+        pass
+
+    def clip_play(self) -> int:
+        self.channelClip.play(mySound, loops=0)
+        pass
+
+    def clip_stop(self) -> None:
+        self.channelClip.stop()
+        pass
+
+    def stop_all_audio_play(self) -> None:
+        pygame.mixer.stop()
 
     def start_recording(self) -> bool:
         '''Returns immediately. Recording is done in a new thread.
@@ -72,9 +94,6 @@ class AudioCtrl:
         )
         effectthread.start()
         return True
-
-    def abort(self) -> None:
-        if self.is_recording(): self.stop_recording()
 
     def save_to_hwSwitch(self, switch: int) -> str:
         if self.current_filepath is None or self.current_filepath == "":
