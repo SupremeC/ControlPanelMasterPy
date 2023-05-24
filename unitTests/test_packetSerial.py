@@ -47,7 +47,7 @@ class Test_Threading(unittest.TestCase):
 
         # assert
         self.assertIsNotNone(port, "Port is not found")
-        self.assertFalse("error" in port)
+        self.assertFalse("Error" in port, "Port not found")
 
 
 if __name__ == '__main__':

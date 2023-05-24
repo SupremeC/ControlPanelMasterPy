@@ -64,7 +64,7 @@ class Test_AudioCtrl(unittest.TestCase):
 
         # act
         recstarted = ac.start_recording()
-        time.sleep(.2)
+        time.sleep(2)
         ac.stop_recording()
         time.sleep(.1)
         ac.apply_effect(EffectType.REVERSE)

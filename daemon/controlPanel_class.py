@@ -66,6 +66,7 @@ class ControlPanel:
     def start(self):
         """Opens serial connection and start Read and Write worker threads"""
         try:
+            self.reset()
             self._pserial.open_connection()
         except Exception as e:
             logger.error(e)
@@ -114,7 +115,7 @@ class ControlPanel:
                 self._switchStatusChanged(packet)
                 pass
             elif(packet.hwEvent == HWEvent.UNDEFINED):
-                logger.error("Recevied undefined package: %s", packet)
+                logger.warn("Recevied undefined package: %s", packet)
                 pass
         except Full:
             pass
@@ -147,10 +148,10 @@ class ControlPanel:
             self.ledstripControl(packet)
         if packet.target >=38 and packet.target <= 41:
             self._set_relays(packet, safetyctrl = True)
-        if packet.target >=101 and packet.target <= 108:
-            # analog controls adds '100' to pinnr
+        if packet.target >=52 and packet.target <= 59:
+            # analog controls (A0 == 52, A1=53, ...)
             self.ledstripControl(packet)
-        if packet.target == 109:
+        if packet.target == 60:
             self._setVolume(packet)
 
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
@@ -171,8 +172,11 @@ class ControlPanel:
         # self._packet_sendqueue.put(Packet(HWEvent.SWITCH, relayPin, packet.val))
         raise Exception()
 
+    def ledstripControl(self, packet: Packet):
+        pass
+
     def sendPackets(self, packets: List, block: bool = False, timeout: float = None) -> None:
-        """ Puts the packet in queue. It will be picked up ASAP by packetSerial thread"""
+        """ Puts the packet into sendQueue. It will be picked up ASAP by packetSerial thread"""
         for p in packets:
             self._packet_sendqueue.put(p, block, timeout)
 

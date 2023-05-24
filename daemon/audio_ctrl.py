@@ -92,6 +92,7 @@ class AudioCtrl:
                 callback=p_callback
             ),
         )
+        self.effects_running = True
         effectthread.start()
         return True
 

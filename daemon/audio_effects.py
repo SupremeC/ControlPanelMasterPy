@@ -74,7 +74,7 @@ class AudioEffect:
         self._applyBoard(board, infile, outfile)
         return outfile
 
-    def reverse(infile, outfile) -> str:
+    def reverse(self, infile, outfile) -> str:
         with wave.open(infile, "rb") as input_wave:
             # Read the wave file
             samples = np.frombuffer(input_wave.readframes(input_wave.getnframes()), dtype=np.int16)

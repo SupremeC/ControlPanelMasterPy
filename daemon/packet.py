@@ -16,7 +16,6 @@ class HWEvent  (IntEnum):
     SWITCH = 5
     DEMO = 6
     BLINK = 7
-    """ Remember to turn OFF LED after Blink (Val == 16) """
     STATUS = 8
     """ Status report of a ctrl/led/relay. Does this hold up? """
     HELLO = 9
