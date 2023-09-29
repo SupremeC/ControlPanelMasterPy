@@ -3,6 +3,7 @@
 
 from queue import Queue
 import daemon.packetSerial
+import daemon.setup_logger
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
 import unittest   # noqa
 from datetime import datetime, timedelta

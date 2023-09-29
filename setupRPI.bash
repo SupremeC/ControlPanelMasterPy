@@ -46,8 +46,8 @@ pip install rich
 pip install pyserial
 pip install cobs
 
-#Set audio output to 3.5mm jack
-amixer cset numid=3 1
+#NOT WORKING: Set audio output to 3.5mm jack
+sudo amixer cset numid=3 1
 
 #List audio devices
 arecord --list-devices

@@ -70,6 +70,7 @@ class PacketSerial:
                 self._writeserial_thread.start()
         except Exception as e:
             logger.error(e)
+            raise
 
     def close_connection(self) -> None:
         try:

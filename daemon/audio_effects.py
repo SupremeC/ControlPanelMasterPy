@@ -4,7 +4,7 @@ import wave
 import pedalboard
 from pedalboard import Pedalboard, Chorus, Delay, Bitcrush
 from pedalboard import Plugin, Reverb, Compressor, Gain
-from pedalboard import Phaser, LadderFilter, Distortion
+from pedalboard import Phaser, LadderFilter, Distortion, time_stretch
 from pedalboard.io import AudioFile
 import numpy as np
 from pydub import AudioSegment
@@ -53,6 +53,9 @@ class AudioEffect:
             raise Exception(f"EffectType not supported. Type == {effect}")
 
     def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
+        board = Pedalboard([time_stretch(stretch)])
+        self._applyBoard(board, infile, outfile)
+        return outfile
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
         sf.write(outfile, yw, sr, format='wav')

@@ -61,22 +61,26 @@ class Test_AudioCtrl(unittest.TestCase):
     def test_effect_reverseEffect(self):
         # arrange
         ac = AudioCtrl()
+        audiofile1 = ""
+        audiofile2 = ""
 
         # act
         recstarted = ac.start_recording()
         time.sleep(2)
         ac.stop_recording()
+        audiofile1 = ac.current_filepath
         time.sleep(.1)
         ac.apply_effect(EffectType.REVERSE)
         while ac.effects_running:
             time.sleep(.001)
+            audiofile2 = ac.current_filepath
         
-        # assert (default values)
+        # assert
         self.assertTrue(recstarted)
         self.assertTrue(ac.current_filepath is not None)
         self.assertTrue(pathlib.Path(ac.current_filepath).exists())
         self.assertTrue(pathlib.Path(ac.current_filepath).suffix == ".wav")
-        a = 44
+        self.assertNotEqual(audiofile1, audiofile2)
 
     def test_effect_callback(self):
         # arrange
