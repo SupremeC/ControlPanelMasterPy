@@ -5,11 +5,11 @@ import serial
 import logging
 import serial.tools.list_ports
 from cobs import cobs  # noqa
-from daemon import packet
+import packet
 from queue import Queue, Empty, Full
 import time
 import threading
-from daemon.slidingWindowClass import SlidingWindow
+from slidingWindowClass import SlidingWindow
 
 
 logger = logging.getLogger('daemon.PacketSerial')
@@ -26,9 +26,10 @@ class PacketSerial:
     @property
     def is_conn_open(self):
         return False if self._ser is None else self._ser.is_open
+    BAUDRATE = 115200
 
     def __init__(self, rqueue: Queue, squeue: Queue):
-        self._port = self.find_arduino()
+        self._port = self.find_port_to_arduino()
         self._ser = None
         self._received_queue = rqueue
         self._send_queue = squeue
@@ -42,7 +43,7 @@ class PacketSerial:
         self.throttle.capacity = nr_of_packets
         self.throttle.time_unit = ptime_unit
 
-    def find_arduino(self) -> str:
+    def find_port_to_arduino(self) -> str:
         """Get the name of the port that is connected to Arduino."""
         port = "ErrorPS.01: Arduino not found"
         ports = serial.tools.list_ports.comports()
@@ -57,7 +58,7 @@ class PacketSerial:
     def open_connection(self) -> None:
         try:
             logger.info("PacketSerial Opening port " + self.port)
-            self._ser = serial.Serial(port=self._port, baudrate=115200)
+            self._ser = serial.Serial(port=self._port, baudrate=self.BAUDRATE)
             logger.info("Serial port is " +
                         "open" if self._ser.is_open else "closed")
             if self._readserial_thread is None:
@@ -109,6 +110,7 @@ class PacketSerial:
                     # last byte (packet devider byte)
                     rbytes = self._ser.read_until(b'\x00')[:-1]
                     self._received_queue.put_nowait(PacketSerial.decode_packet(rbytes))
+                time.sleep(0.05)
             except Exception as e:
                 logger.error(e)
         self._rshutdown_flag.clear()

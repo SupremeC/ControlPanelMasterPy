@@ -34,10 +34,10 @@ from typing import List
 import datetime
 import logging
 from queue import Queue, Full, Empty
-from daemon.packetSerial import PacketSerial
-from daemon.packet import Packet, HWEvent, ErrorType # noqa
-from daemon.ctrlsClass import HwCtrls, Hwctrl
-from daemon.slidingWindowClass import SlidingWindow
+from packetSerial import PacketSerial
+from packet import Packet, HWEvent, ErrorType # noqa
+from ctrlsClass import HwCtrls, Hwctrl
+from slidingWindowClass import SlidingWindow
 
 logger = logging.getLogger('daemon.ctrlPanel')
 # The buffer of Arduino is increased to 256 bytes (if it works)

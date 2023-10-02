@@ -31,7 +31,7 @@ import sys
 import time
 import logging
 import os
-import daemon.setup_logger as setup_logger # noqa
+import setup_logger as setup_logger # noqa
 from daemonSuperClass import Daemon
 from controlPanel_class import ControlPanel
 

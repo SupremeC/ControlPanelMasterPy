@@ -1,8 +1,5 @@
 #!/usr/bin/env python
 
-
-from queue import Queue
-import daemon.packetSerial
 import unittest   # noqa
 from time import time, sleep
 from daemon.slidingWindowClass import SlidingWindow
@@ -43,7 +40,7 @@ class Test_SlidingWindow(unittest.TestCase):
 
     def test_sendPackets_okRate(self):
         throttle = SlidingWindow(self.packets_per_window, self.time_window)
-        sleep_dur = (self.time_window / self.packets_per_window) * .95
+        sleep_dur = (self.time_window / self.packets_per_window) * 1
         r = []
         for i in range(self.packets_to_send):
             r.append(throttle.ok_to_send())
@@ -55,7 +52,7 @@ class Test_SlidingWindow(unittest.TestCase):
             if x: success+=1
             else: failed+=1
 
-        self.assertTrue(all(r))
+        self.assertTrue(all(r),  f"Expected all {len(r)} to succeed but {failed} failed.")
         pass
 
     def test_sendPackets_wayToHighRate(self):

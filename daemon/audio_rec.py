@@ -45,7 +45,7 @@ class AudioRec():
         self.audio_q = queue.Queue()
         self.metering_q = queue.Queue(maxsize=1)
         self.peak = 0
-        self.device_ID = 10 # default device
+        self.device_ID = 1 # default device
         self.max_rec_time = 30  # in seconds
 
         self.__dir = dir

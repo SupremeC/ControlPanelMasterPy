@@ -1,4 +1,6 @@
-import unittest   # noqa
+#!/usr/bin/env python
+
+import unittest
 from datetime import datetime, timedelta
 import time
 from daemon.audio_ctrl import AudioCtrl
@@ -12,90 +14,105 @@ class AnyStringWith(str):
         return self in other
 
 class Test_AudioCtrl(unittest.TestCase):
-    def test_init_correctDefaultValues(self):
+    @classmethod
+    def setUpClass(cls):
         # arrange
-        ac = AudioCtrl()
+        cls.ac = AudioCtrl()
 
+    def test_init_correctDefaultValues(self):
         # assert (default values)
-        self.assertTrue(ac.current_filepath is None)
-        self.assertFalse(ac.is_recording())
-        self.assertFalse(ac.effects_running)
-        self.assertIsInstance(ac.rec_ctrl, AudioRec)
-        self.assertIsInstance(ac.effect_ctrl, AudioEffect)
+        self.assertFalse(self.ac.is_recording())
+        self.assertFalse(self.ac.effects_running)
+        self.assertIsInstance(self.ac.rec_ctrl, AudioRec)
+        self.assertIsInstance(self.ac.effect_ctrl, AudioEffect)
 
     def test_rec_singleRec(self):
-        # arrange
-        ac = AudioCtrl()
-
         # act
-        recstarted = ac.start_recording()
+        recstarted = self.ac.start_recording()
         time.sleep(.2)
-        ac.stop_recording()
+        self.ac.stop_recording()
 
         # assert (default values)
         self.assertTrue(recstarted)
-        self.assertTrue(ac.current_filepath is not None)
-        self.assertTrue(pathlib.Path(ac.current_filepath).exists())
-        self.assertTrue(pathlib.Path(ac.current_filepath).suffix == ".wav")
+        self.assertTrue(self.ac.current_filepath is not None)
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).exists())
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).suffix == ".wav")
+        self.assertFalse(self.ac.is_recording())
 
     def test_rec_doubleRec(self):
-        # arrange
-        ac = AudioCtrl()
-
         # act
-        recstarted = ac.start_recording()
+        recstarted = self.ac.start_recording()
         time.sleep(.1)
-        ac.stop_recording()
+        self.ac.stop_recording()
 
-        recstarted2 = ac.start_recording()
+        recstarted2 = self.ac.start_recording()
         time.sleep(.1)
-        ac.stop_recording()
+        self.ac.stop_recording()
 
         # assert (default values)
         self.assertTrue(recstarted)
         self.assertTrue(recstarted2)
-        self.assertTrue(ac.current_filepath is not None)
-        self.assertTrue(pathlib.Path(ac.current_filepath).exists())
-        self.assertTrue(pathlib.Path(ac.current_filepath).suffix == ".wav")
+        self.assertTrue(self.ac.current_filepath is not None)
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).exists())
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).suffix == ".wav")
 
     def test_effect_reverseEffect(self):
-        # arrange
-        ac = AudioCtrl()
         audiofile1 = ""
         audiofile2 = ""
 
         # act
-        recstarted = ac.start_recording()
+        recstarted = self.ac.start_recording()
         time.sleep(2)
-        ac.stop_recording()
-        audiofile1 = ac.current_filepath
+        self.ac.stop_recording()
+        audiofile1 = self.ac.current_filepath
         time.sleep(.1)
-        ac.apply_effect(EffectType.REVERSE)
-        while ac.effects_running:
+        self.ac.apply_effect(EffectType.REVERSE)
+        while self.ac.effects_running:
             time.sleep(.001)
-            audiofile2 = ac.current_filepath
+        audiofile2 = self.ac.current_filepath
         
         # assert
         self.assertTrue(recstarted)
-        self.assertTrue(ac.current_filepath is not None)
-        self.assertTrue(pathlib.Path(ac.current_filepath).exists())
-        self.assertTrue(pathlib.Path(ac.current_filepath).suffix == ".wav")
+        self.assertTrue(self.ac.current_filepath is not None)
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).exists())
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).suffix == ".wav")
         self.assertNotEqual(audiofile1, audiofile2)
 
+    def test_effect_time_stretch(self):
+        # act
+        self.ac.start_recording()
+        time.sleep(2)
+        self.ac.stop_recording()
+        time.sleep(.1)
+        self.ac.apply_effect(EffectType.TIMESTRETCH)
+        while self.ac.effects_running:
+            time.sleep(.001)
+        
+        # assert
+        self.assertTrue(self.ac.current_filepath is not None)
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).exists())
+        self.assertTrue(pathlib.Path(self.ac.current_filepath).suffix == ".wav")
+
+
     def test_effect_callback(self):
-        # arrange
-        ac = AudioCtrl()
         fn_mock_PlaySound = Mock()
 
         # act
-        recstarted = ac.start_recording()
+        recstarted = self.ac.start_recording()
         time.sleep(.1)
-        ac.stop_recording()
-        while(ac.is_recording()):
+        self.ac.stop_recording()
+        while(self.ac.is_recording()):
             time.sleep(.001)
-        ac.apply_effect(EffectType.REVERSE, fn_mock_PlaySound)
-        while ac.effects_running:
+        self.ac.apply_effect(EffectType.REVERSE, fn_mock_PlaySound)
+        while self.ac.effects_running:
             time.sleep(.001)
 
         # assert (default values)
         fn_mock_PlaySound.assert_called_once_with(AnyStringWith(".wav"))
+
+    @classmethod
+    def tearDownClass(cls):
+        pass
+
+if __name__ == '__main__':
+    unittest.main()

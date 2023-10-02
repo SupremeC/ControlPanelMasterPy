@@ -53,9 +53,11 @@ class AudioEffect:
             raise Exception(f"EffectType not supported. Type == {effect}")
 
     def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
-        board = Pedalboard([time_stretch(stretch)])
-        self._applyBoard(board, infile, outfile)
-        return outfile
+        # TODO: Pedalboard have implemented timestrech but cannot make it work
+        #  - Time_stretch is a function instead of class (expected)
+        # board = Pedalboard([time_stretch(stretch_factor=stretch)])
+        # self._applyBoard(board, infile, outfile)
+        # return outfile
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
         sf.write(outfile, yw, sr, format='wav')

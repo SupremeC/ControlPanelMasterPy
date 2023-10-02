@@ -16,6 +16,8 @@ git config --global user.name "David Berglund"
 #              IdentityFile "/Users/david/.ssh/keys/AxelControlPanel_rsa"
 
 
+sudo apt-get install -y rubberband-cli
+
 # Audio effects
 pip install pedalboard
 pip install AudioSegment
@@ -25,6 +27,7 @@ pip install PYRubberBand
 python3 -m pip install sounddevice
 pip install soundfile
 pip install shortuuid
+pip install librosa
 sudo apt-get install python3-numpy
 sudo apt-get install libportaudio2
 pip install scipy
@@ -51,3 +54,6 @@ sudo amixer cset numid=3 1
 
 #List audio devices
 arecord --list-devices
+
+#list mics
+ python3 -m sounddevice
