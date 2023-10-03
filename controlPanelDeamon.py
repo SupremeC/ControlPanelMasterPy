@@ -31,14 +31,14 @@ import sys
 import time
 import logging
 import os
-import setup_logger as setup_logger # noqa
-from daemonSuperClass import Daemon
-from controlPanel_class import ControlPanel
+import daemon.setup_logger as setup_logger # noqa
+from daemon.daemonSuperClass import DaemonSC
+from daemon.controlPanel_class import ControlPanel
 
 logger = logging.getLogger('daemon')
 
 
-class MyDaemon(Daemon):
+class MyDaemon(DaemonSC):
     """    def __init__(self, pidfile):
             super().__init__(pidfile)
             self._controlPanel = None"""
@@ -51,6 +51,7 @@ class MyDaemon(Daemon):
         while not self.kill_now:
             self._controlPanel.process()
             time.sleep(1)
+            logger.debug("loop")
         logger.debug("exiting run() method")
 
     def cleanup(self, signum, signame):

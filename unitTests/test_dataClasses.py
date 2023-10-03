@@ -9,16 +9,16 @@ sys.path[0] = str(Path(sys.path[0]).parent)
 
 from typing import List
 from daemon.packet import Packet, HWEvent, ErrorType   # noqa
-from daemon.ctrlsClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, swOff, swOn, NoLed
+from daemon.ctrlsClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, SWITCH_OFF, SWITCH_ON, NO_LED
 import unittest   # noqa
 
 
 class Test_Hwctrl(unittest.TestCase):
     def test_compare(self):
         # act
-        a = Hwctrl(pin=2, state= swOn, section="test")
-        b = Hwctrl(pin=2, state= swOff, section="test")
-        c = Hwctrl(pin=3, state= swOn, section="test")
+        a = Hwctrl(pin=2, state= SWITCH_ON, section="test")
+        b = Hwctrl(pin=2, state= SWITCH_OFF, section="test")
+        c = Hwctrl(pin=3, state= SWITCH_ON, section="test")
 
         # assert
         self.assertEqual(a, b)
@@ -26,9 +26,9 @@ class Test_Hwctrl(unittest.TestCase):
 
     def test_state(self):
         # act
-        a = Hwctrl(pin=2, state= swOn, section="test")
+        a = Hwctrl(pin=2, state= SWITCH_ON, section="test")
         b = Hwctrl(pin=2, state= bool(0), section="test")
-        c = Hwctrl(pin=2, state= swOff, section="test")
+        c = Hwctrl(pin=2, state= SWITCH_OFF, section="test")
         c.set_state(44)
 
         # assert
@@ -38,11 +38,11 @@ class Test_Hwctrl(unittest.TestCase):
 
     def test_setState(self):
         # act
-        a = Hwctrl(pin=2, state= swOn, ledboard=PwmBoard.I2CALED, ledPin=8, section="test")
+        a = Hwctrl(pin=2, state= SWITCH_ON, ledboard=PwmBoard.I2CALED, ledPin=8, section="test")
         aPackets = a.set_state(False)
-        b = Hwctrl(pin=2, state= swOff, section="test")
+        b = Hwctrl(pin=2, state= SWITCH_OFF, section="test")
         bPackets = b.set_state(True)
-        c = Hwctrl(pin=2, state= swOff, section="test")
+        c = Hwctrl(pin=2, state= SWITCH_OFF, section="test")
         cPackets = c.set_state(44)
 
         # assert
@@ -76,7 +76,7 @@ class TestAnalogCtrl(unittest.TestCase):
         # act
         a = Analogctrl(pin=2, state=222, ledboard=PwmBoard.I2CCLED, ledPin=8, section="test")
         aPackets = a.set_state(3001)
-        b = Analogctrl(pin=3, state= swOn, ledboard=PwmBoard.I2CCLED, ledPin=NoLed, section="test")
+        b = Analogctrl(pin=3, state= SWITCH_ON, ledboard=PwmBoard.I2CCLED, ledPin=NO_LED, section="test")
         bPackets = b.set_state(0)
         # assert
         self.assertEqual(a.state, 3001)
@@ -130,12 +130,12 @@ class TestAuxCtrls(unittest.TestCase):
                     raise Exception("Pin already exists")
                 d[dictKey] = "pin"
 
-            if ctrl.ledboard == PwmBoard.NONE_ and ctrl.ledPin != NoLed:
+            if ctrl.ledboard == PwmBoard.NONE_ and ctrl.ledPin != NO_LED:
                 dictKey = "pin="+str(ctrl.ledPin)
                 if dictKey in d:
                     raise Exception("LPin already exists")
                 d[dictKey] = "ledPin"
-            elif ctrl.ledboard != PwmBoard.NONE_ and ctrl.ledPin != NoLed:
+            elif ctrl.ledboard != PwmBoard.NONE_ and ctrl.ledPin != NO_LED:
                 dictKey = "board="+str(ctrl.ledboard)+", pin="+str(ctrl.ledPin)
                 if dictKey in d:
                     raise Exception("Pwm.LedPin already exists.\rExisting->" + str(d[dictKey]) +"\rNew->" + str(ctrl))

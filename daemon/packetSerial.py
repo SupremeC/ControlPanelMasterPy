@@ -10,7 +10,7 @@ import serial
 import serial.tools.list_ports
 from cobs import cobs  # noqa
 
-from daemon.packet import Packet
+from daemon.packet import HWEvent, Packet
 from daemon.slidingWindowClass import SlidingWindow
 
 
@@ -91,11 +91,12 @@ class PacketSerial:
 
     def send_hello(self) -> None:
         try:
-            packet = packet.Packet(packet.HWEvent.HELLO, 1, 1)
+            packet = Packet(HWEvent.HELLO, 1, 1)
             self._send_queue.put(packet, block=True, timeout=10)
+            logger.debug(f"sendQueue size: {self._send_queue.qsize()}")
         except Exception as e:
+            logger.error("ah crap")
             logger.error(e)
-        pass
 
     def start_read_packets(self) -> None:
         while not self._rshutdown_flag.is_set():
@@ -125,6 +126,7 @@ class PacketSerial:
                     continue
                 try:
                     packet = self._send_queue.get_nowait(block=False)
+                    self._send_queue.task_done()
                     if packet != None:
                         self.__send_packet()
                 except Empty:

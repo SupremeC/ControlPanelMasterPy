@@ -35,10 +35,10 @@ import logging
 from queue import Empty, Full, Queue
 from typing import List
 
-from daemon.ctrlsClass import Hwctrl, HwCtrls
-from daemon.packet import ErrorType, HWEvent, Packet  # noqa
-from daemon.packetSerial import PacketSerial
-from daemon.slidingWindowClass import SlidingWindow
+from .ctrlsClass import Hwctrl, HwCtrls
+from .packet import ErrorType, HWEvent, Packet  # noqa
+from .packetSerial import PacketSerial
+from .slidingWindowClass import SlidingWindow
 
 logger = logging.getLogger('daemon.ctrlPanel')
 # The buffer of Arduino is increased to 256 bytes (if it works)
@@ -83,16 +83,21 @@ class ControlPanel:
 
     def process(self) -> None:
         ''' Call this method regularly to process packets'''
+        logger.debug("process.loop()...")
         self._process_packets()
         if self.time_to_send_hello():
             self._pserial.send_hello()
-
+        logger.debug("process.loop() complete")
+        
     def _process_packets(self) -> None:
+        logger.debug("_process_packets loop...")
         try:
-            while(self._packet_receivedqueue.qsize > 0):
+            while(self._packet_receivedqueue.qsize() > 0):
                 self.__act(self._packet_receivedqueue.get(block=True, timeout=2))
+                self._packet_receivedqueue.task_done()
         except Empty:
             pass
+        logger.debug("_process_packets loop: complete")
 
     def __act(self, packet: Packet) -> None:
         try:
@@ -118,42 +123,49 @@ class ControlPanel:
             elif(packet.hwEvent == HWEvent.UNDEFINED):
                 logger.warn("Recevied undefined package: %s", packet)
                 pass
-        except Full:
+        except Full as errFull:
+            logger.error(errFull)
+        except Exception as error:
+            logger.error(errFull)
             pass
+
     
     def _switchStatusChanged(self, packet: Packet) -> Packet:
-        '''Handles button logic'''
-        if packet.target == 12:  # MainSwitch
-            self.set_panelstatus(bool(packet.val))
-        if not self._mainMasterOn.state: return
+        try:
+            '''Handles button logic'''
+            if packet.target == 12:  # MainSwitch
+                self.set_panelstatus(bool(packet.val))
+            if not self._mainMasterOn.state: return
 
-        if packet.target == 15:  # Inputs on / off
-            self._mainInputsOn.set_state(bool(packet.val))
-        if packet.target == 14:  # Backlight
-            self.sendPackets(self._mainbacklight.set_state(bool(packet.val)))
-            # TODO - turn off btn LEDs also? YES!
-        if packet.target == 16:  # Sound on / off
-            self._mainaudioOn.state = bool(packet.val)
+            if packet.target == 15:  # Inputs on / off
+                self._mainInputsOn.set_state(bool(packet.val))
+            if packet.target == 14:  # Backlight
+                self.sendPackets(self._mainbacklight.set_state(bool(packet.val)))
+                # TODO - turn off btn LEDs also? YES!
+            if packet.target == 16:  # Sound on / off
+                self._mainaudioOn.state = bool(packet.val)
 
-        if not self._mainInputsOn.state: return
+            if not self._mainInputsOn.state: return
 
-        if packet.target >= 2 and packet.target <= 11:
-            self.playSound(packet)
-        if packet.target >=17 and packet.target <= 26:  #pin 20,21 is excluded
-            self.apply_sound_effect(packet)
-        if packet.target == 27:
-            self._record_audio(packet)
-        if packet.target >=28 and packet.target <= 31:
-            self._set_relays(packet)
-        if packet.target >=32 and packet.target <= 37:
-            self.ledstripControl(packet)
-        if packet.target >=38 and packet.target <= 41:
-            self._set_relays(packet, safetyctrl = True)
-        if packet.target >=52 and packet.target <= 59:
-            # analog controls (A0 == 52, A1=53, ...)
-            self.ledstripControl(packet)
-        if packet.target == 60:
-            self._setVolume(packet)
+            if packet.target >= 2 and packet.target <= 11:
+                self.playSound(packet)
+            if packet.target >=17 and packet.target <= 26:  #pin 20,21 is excluded
+                self.apply_sound_effect(packet)
+            if packet.target == 27:
+                self._record_audio(packet)
+            if packet.target >=28 and packet.target <= 31:
+                self._set_relays(packet)
+            if packet.target >=32 and packet.target <= 37:
+                self.ledstripControl(packet)
+            if packet.target >=38 and packet.target <= 41:
+                self._set_relays(packet, safetyctrl = True)
+            if packet.target >=52 and packet.target <= 59:
+                # analog controls (A0 == 52, A1=53, ...)
+                self.ledstripControl(packet)
+            if packet.target == 60:
+                self._setVolume(packet)
+        except Exception as err:
+            logger.error(err)
 
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
@@ -168,6 +180,7 @@ class ControlPanel:
         except Exception as e:
             logger.error(e)
 
+        # TODO
         # IF ControlSwitch=ON, set relay!
         # relayPin = packet.target + 16
         # self._packet_sendqueue.put(Packet(HWEvent.SWITCH, relayPin, packet.val))
@@ -191,13 +204,19 @@ class ControlPanel:
             return False
 
     def reset(self):
-        self._ctrls.reset()
-        self.clearPacketQueue()
-        self._mainMasterOn: Hwctrl = self._ctrls.get_ctrl(12)
-        self._mainInputsOn: Hwctrl = self._ctrls.get_ctrl(15)
-        self._mainaudioOn: Hwctrl = self._ctrls.get_ctrl(16)
-        # send RequestStatus packet to get actual ctrls status
-        self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
+        logger.debug("reseting 'controlPanel_class' instance")
+        try:
+            self._ctrls.reset()
+            self.clearPacketQueue()
+            self._mainMasterOn: Hwctrl = self._ctrls.get_ctrl(12)
+            self._mainInputsOn: Hwctrl = self._ctrls.get_ctrl(15)
+            self._mainaudioOn: Hwctrl = self._ctrls.get_ctrl(16)
+            # send RequestStatus packet to get actual ctrls status
+            self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
+        except Exception as err:
+            logger.error(err)
+        else:
+            logger.debug("reset done")
 
     def set_panelstatus(self, state: bool):
         self._mainMasterOn.state = state
@@ -206,11 +225,16 @@ class ControlPanel:
 
 
     def clearPacketQueue(self):
-        with self._packet_sendqueue.mutex:
-            logger.info("clearing packet queue of {}".format(self._packet_sendqueue.qsize))
-            self._packet_sendqueue.queue.clear()
-            self._packet_sendqueue.all_tasks_done.notify_all()
-            self._packet_sendqueue.unfinished_tasks = 0
+        if(self._packet_sendqueue.qsize() > 0):
+            while not self._packet_sendqueue.empty():
+                    try:
+                        self._packet_sendqueue.get(block=False)
+                    except Empty:
+                        continue
+                    self._packet_sendqueue.task_done()
+            logger.debug("SendQueue is now cleared.")
+        else:
+            logger.debug("SendQueue is empty. Good")
 
 # Button(s) pin,name,section,coordXY
 # LEDS      pin,name,section,coordXY,board,minV,maxV
