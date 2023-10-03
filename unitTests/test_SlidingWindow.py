@@ -15,7 +15,7 @@ class Test_SlidingWindow(unittest.TestCase):
 
     packets_to_send: int = 100
     packets_per_window: int = 30
-    time_window: float = 0.05
+    time_window: float = 1
 
     def test_Time_precisionIsInMillis(self):
         # arrange
@@ -59,7 +59,8 @@ class Test_SlidingWindow(unittest.TestCase):
 
     def test_sendPackets_wayToHighRate(self):
         throttle = SlidingWindow(self.packets_per_window, self.time_window)
-        sleep_dur = (self.time_window / self.packets_per_window) * 0
+        throttle._pre_count = 0
+        sleep_dur = (self.time_window / self.packets_per_window) * 0.1
         buff = []
         for i in range(self.packets_to_send):
             buff.append(throttle.ok_to_send())
@@ -73,11 +74,11 @@ class Test_SlidingWindow(unittest.TestCase):
             else:
                 failedCount += 1
 
-        # At least some calls should have been successful
-        self.assertGreater(
+        # At least {self.packets_per_window} calls should have been successful
+        self.assertGreaterEqual(
             successCount,
-            0,
-            f"Expected that some of {len(buff)} succeded but {successCount} did",
+            30,
+            f"Expected that at least {self.packets_per_window} of {len(buff)} succeded but {successCount} did",
         )
         # most should have failed
         self.assertGreater(

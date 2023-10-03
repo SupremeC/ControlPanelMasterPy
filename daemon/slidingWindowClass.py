@@ -3,7 +3,7 @@ from time import time, sleep
 
 class SlidingWindow:
     '''
-    Rate throttling. Determnes how many packages are allowed per timeUnit.
+    Rate throttling. Determines how many packages are allowed per timeUnit.
 
     :param limit_per_timeunit: How many packages are allowed to be sent per timeunit
     :param time_unit: Length of time_unit
@@ -17,7 +17,7 @@ class SlidingWindow:
         self.limit_per_timeunit: int = limit_per_timeunit
         self.time_unit: float = time_unit
         self._cur_time = time()
-        self._pre_count: int = limit_per_timeunit
+        self._pre_count: int = 0
         self._cur_count: int = 0
 
     def ok_to_send(self):

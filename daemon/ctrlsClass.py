@@ -3,7 +3,8 @@
 
 from dataclasses import dataclass, field
 from typing import List
-from packet import PwmBoard, Packet, HWEvent
+
+from daemon.packet import HWEvent, Packet, PwmBoard
 
 NoLed: int = -1
 swOff: bool = False

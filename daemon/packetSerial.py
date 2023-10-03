@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 
-from typing import List
-import serial
 import logging
+import threading
+import time
+from queue import Empty, Full, Queue
+from typing import List
+
+import serial
 import serial.tools.list_ports
 from cobs import cobs  # noqa
-import packet
-from queue import Queue, Empty, Full
-import time
-import threading
-from slidingWindowClass import SlidingWindow
+
+from daemon.packet import Packet
+from daemon.slidingWindowClass import SlidingWindow
 
 
 logger = logging.getLogger('daemon.PacketSerial')
@@ -134,7 +136,7 @@ class PacketSerial:
                 time.sleep(0.05)
         self._sshutdown_flag.clear()
 
-    def __send_packet(self, packet: packet.Packet) -> None:
+    def __send_packet(self, packet: Packet) -> None:
         if self._ser is None:
             logger.error("cannot send Packet when connection=None")
             return
@@ -146,13 +148,13 @@ class PacketSerial:
         self._ser.write(b'\x00') # packet divider
 
     @staticmethod
-    def encode_packet(packet: packet.Packet) -> bytes:
+    def encode_packet(packet: Packet) -> bytes:
         return cobs.encode(packet.as_bytes())
         # encoded_packet = bytearray(cobs.encode(packet.as_bytes()))
         # encoded_packet.extend(b'\x00')  # Add package sequence (divider)
         # return bytes(encoded_packet)
 
     @staticmethod
-    def decode_packet(b: bytes) -> packet.Packet:
-        p = packet.Packet(cobs.decode(b[:-1]))
+    def decode_packet(b: bytes) -> Packet:
+        p = Packet(cobs.decode(b[:-1]))
         return p

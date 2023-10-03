@@ -6,12 +6,12 @@ from pathlib import Path
 sys.path[0] = str(Path(sys.path[0]).parent)
 """
 
-from daemon.controlPanel_class import ControlPanel
-from daemon.packet import Packet, HWEvent, ErrorType # noqa
-import unittest   # noqa
-from datetime import datetime, timedelta
 import time
+import unittest  # noqa
+from datetime import datetime, timedelta
 
+from daemon.controlPanel_class import ControlPanel
+from daemon.packet import ErrorType, HWEvent, Packet  # noqa
 
 
 class Test_timeToSendHello(unittest.TestCase):
