@@ -40,7 +40,7 @@ class PacketSerial:
         self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
 
     def set_rate_limit(self, nr_of_packets:int, ptime_unit: float):
-        self.throttle.capacity = nr_of_packets
+        self.throttle.limit_per_timeunit = nr_of_packets
         self.throttle.time_unit = ptime_unit
 
     def find_port_to_arduino(self) -> str:
