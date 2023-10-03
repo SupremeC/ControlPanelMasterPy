@@ -128,7 +128,7 @@ class TestAuxCtrls(unittest.TestCase):
                 dictKey = "pin="+str(ctrl.pin)
                 if dictKey in d:
                     raise Exception("Pin already exists")
-                d[dictKey] = "pin"
+                d[dictKey] = "ctrlpin"
 
             if ctrl.ledboard == PwmBoard.NONE_ and ctrl.ledPin != NO_LED:
                 dictKey = "pin="+str(ctrl.ledPin)
@@ -149,10 +149,6 @@ class TestAuxCtrls(unittest.TestCase):
 
         # act & assert
         self.assertRaises(Exception, a.get_ctrl, 999)
-        ss= 12
-
-    def helper_filterCtrls():
-        pass
 
 
 if __name__ == '__main__':

@@ -103,7 +103,7 @@ class AudioCtrl:
         if( self.current_filepath == destfile):
             return
         if self.file_exist(destfile):
-            AudioCtrl.__removeFile(destfile)
+            AudioCtrl.__remove_file(destfile)
             f = Path(self.current_filepath)
             self.current_filepath = f.rename(self.__storagedir / f.name)
             return self.current_filepath
@@ -130,7 +130,7 @@ class AudioCtrl:
     def __create_dir(dir_name: Path) -> None:
         dir_name.mkdir(parents=True, exist_ok=True)
 
-    def __removeFile(p: str) -> None:
+    def __remove_file(p: str) -> None:
         '''Deletes a single file. If the file does not
         exist no error is thrown.'''
         if Path(p).exists(): p.unlink(missing_ok=True)

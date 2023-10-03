@@ -20,7 +20,7 @@
 # Play "click on HwSwitch event?"`
 # Play "workingOnIt" when Applying effect?
 # Control LED Strip(s) via Serial or over WiFi
-
+ 
 
 # TODO MEGA!
 #############################
@@ -58,7 +58,6 @@ class ControlPanel:
         self._mainaudioOn: Hwctrl
         self._mainbacklight: Hwctrl
         self._mainDemo: int = 0
-        self._mainRecording: bool = False
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(self._packet_receivedqueue, self._packet_sendqueue)

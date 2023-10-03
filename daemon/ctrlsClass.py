@@ -111,18 +111,6 @@ class HwCtrls:
                 return ctrl
         raise Exception("No top-level Ctrl found with pin={}".format(pin))
 
-    def __get_slavectrl(ctrl: Hwctrl, pin: int) -> Hwctrl:
-        if ctrl.pin == pin:
-            return ctrl
-        for slave in ctrl.slaves:
-            if slave.pin == pin:
-                return slave
-            else:
-                r = HwCtrls.__get_slavectrl(slave, pin)
-                if r is not None:
-                    return r
-        return None
-
     def get_slavectrl(self, pin: int) -> Hwctrl:
         """
         Searches through all controls (including)
@@ -135,6 +123,18 @@ class HwCtrls:
             foundCtrl = HwCtrls.__get_slavectrl(ctrl, pin)
             if foundCtrl is not None: return foundCtrl
         raise Exception("No Ctrl (searching all) found with pin={}".format(pin))
+
+    def __get_slavectrl(ctrl: Hwctrl, pin: int) -> Hwctrl:
+        if ctrl.pin == pin:
+            return ctrl
+        for slave in ctrl.slaves:
+            if slave.pin == pin:
+                return slave
+            else:
+                r = HwCtrls.__get_slavectrl(slave, pin)
+                if r is not None:
+                    return r
+        return None
 
     def reset(self):
         '''Reset all controls to their initial state'''
