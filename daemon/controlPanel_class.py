@@ -82,21 +82,17 @@ class ControlPanel:
 
     def process(self) -> None:
         ''' Call this method regularly to process packets'''
-        logger.debug("process.loop()...")
         self._process_packets()
         if self.time_to_send_hello():
             self._pserial.send_hello()
-        logger.debug("process.loop() complete")
         
     def _process_packets(self) -> None:
-        logger.debug("_process_packets loop...")
         try:
             while(self._packet_receivedqueue.qsize() > 0):
                 self.__act(self._packet_receivedqueue.get(block=True, timeout=2))
                 self._packet_receivedqueue.task_done()
         except Empty:
             pass
-        logger.debug("_process_packets loop: complete")
 
     def __act(self, packet: Packet) -> None:
         try:

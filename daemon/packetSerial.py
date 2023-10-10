@@ -29,6 +29,7 @@ class PacketSerial:
     def is_conn_open(self):
         return False if self._ser is None else self._ser.is_open
     BAUDRATE = 115200
+    PACKET_DEVIDER = b'\x00'
 
     def __init__(self, rqueue: Queue, squeue: Queue):
         self._port = self.find_port_to_arduino()
@@ -39,6 +40,8 @@ class PacketSerial:
         self._sshutdown_flag = threading.Event()
         self._readserial_thread = None
         self._writeserial_thread = None
+        self.last_sent: list[Packet]
+        self.last_received: list[Packet]
         self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
 
     def set_rate_limit(self, nr_of_packets:int, ptime_unit: float):
@@ -107,12 +110,13 @@ class PacketSerial:
                 logger.error("cannot read Serial when connection is closed")
                 return
             try:
-                logger.info("reading serial")
                 while self._ser.in_waiting > 1:
                     # read until 'devider' (included) and remove
                     # last byte (packet devider byte)
-                    rbytes = self._ser.read_until(b'\x00')[:-1]
-                    self._received_queue.put_nowait(PacketSerial.decode_packet(rbytes))
+                    rbytes = self._ser.read_until(self.PACKET_DEVIDER)[:-1]
+                    p = PacketSerial.decode_packet(rbytes)
+                    self._received_queue.put_nowait(p)
+                    self.log_packet(p, True)
                 time.sleep(0.05)
             except Exception as e:
                 logger.error(e)
@@ -128,7 +132,7 @@ class PacketSerial:
                     packet = self._send_queue.get_nowait(block=False)
                     self._send_queue.task_done()
                     if packet != None:
-                        self.__send_packet()
+                        self.__send_packet(packet)
                 except Empty:
                     pass
                 except Exception as e:
@@ -147,7 +151,16 @@ class PacketSerial:
             return
         encoded_bytes = PacketSerial.encode_packet(packet)
         self._ser.write(encoded_bytes)
-        self._ser.write(b'\x00') # packet divider
+        self._ser.write(self.PACKET_DEVIDER) # packet divider
+        self.log_packet(packet, False)
+
+    def log_packet(self, packet: Packet, received: bool) -> None:
+        alist = self.last_received if received else self.last_sent
+        msg = "packet received: %s" if received else "packet sent: %s"
+        alist.append(packet)
+        while alist.count() > 10:
+            del alist[0]
+        logger.info(msg, packet)
 
     @staticmethod
     def encode_packet(packet: Packet) -> bytes:

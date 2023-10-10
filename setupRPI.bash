@@ -42,8 +42,7 @@ amixer set Capture 100%
 sudo apt install setserial
 
 #Console "GUI"
-pip install "textual[dev]"
-pip install rich
+pip install "textual"
 
 #SERIAL (with COBS encoding)
 pip install pyserial

@@ -1,6 +1,0 @@
-2023-09-27 21:57:45,855	INFO	find_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial
-2023-09-27 22:00:03,191	INFO	open_connection()	PacketSerial Opening port ErrorPS.01: Arduino not found
-2023-09-27 22:00:03,200	ERROR	open_connection()	[Errno 2] could not open port ErrorPS.01: Arduino not found: [Errno 2] No such file or directory: 'ErrorPS.01: Arduino not found'
-2023-09-27 22:03:45,959	INFO	find_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial
-2023-09-27 22:04:09,746	INFO	open_connection()	PacketSerial Opening port ErrorPS.01: Arduino not found
-2023-09-27 22:04:09,758	ERROR	open_connection()	[Errno 2] could not open port ErrorPS.01: Arduino not found: [Errno 2] No such file or directory: 'ErrorPS.01: Arduino not found'

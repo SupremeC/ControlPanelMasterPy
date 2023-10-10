@@ -2,3 +2,4 @@ logs.log
 *.pyc
 daemon/__pycache__/controlPanel_class.cpython-39.pyc
 *.wav
+*.log

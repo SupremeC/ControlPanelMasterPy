@@ -51,7 +51,6 @@ class MyDaemon(DaemonSC):
         while not self.kill_now:
             self._controlPanel.process()
             time.sleep(1)
-            logger.debug("loop")
         logger.debug("exiting run() method")
 
     def cleanup(self, signum, signame):

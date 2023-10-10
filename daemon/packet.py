@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from datetime import datetime
 import logging
 from dataclasses import dataclass, field
 from enum import IntEnum  # , verify, UNIQUE
@@ -53,12 +54,14 @@ class PwmBoard (IntEnum):
 
 @dataclass
 class Packet:
+    _created: datetime
     hwEvent: HWEvent = HWEvent.UNDEFINED
     target: int = 0
     error: ErrorType = ErrorType.NONE_
     val: int = 0
 
     def __init__(self, *args):
+        self._created = datetime.now()
         if len(args) == 0:
             return
         if len(args) == 1:
@@ -95,6 +98,13 @@ class Packet:
         ba.extend(self.val.to_bytes(
             length=2, byteorder='little', signed=False))
         return bytes(ba)
+    
+    def as_human_friendly_str(self) -> str:
+        r = self._created.strftime("%H:%M:%S_")
+        r += self.hwEvent.name.ljust(9, ' ') +"_"
+        r += f"t={str(self.target).ljust(3, ' ')}_v={self.val}_err={'' if self.error == ErrorType.NONE_ else self.error.name}"
+        return r
+
 
 '''
     def __str__(self):
