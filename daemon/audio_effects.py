@@ -1,3 +1,4 @@
+"""Audio Effect"""
 from enum import IntEnum
 import logging
 import wave
@@ -13,7 +14,9 @@ import soundfile as sf
 
 
 class EffectType (IntEnum):
-    NONE_ = 0,
+    """EffectTyåe. Can be applied to sound clip
+    using AudioEffect class"""
+    NONE_ = 0
     REVERB = 1
     PHASER = 2
     REVERSE = 3
@@ -26,10 +29,24 @@ class EffectType (IntEnum):
 
 
 class AudioEffect:
+    """AudioEffect. Can apply audio effects to audio files"""
     def __init__(self) -> None:
         self.logger = logging.getLogger('daemon.AudioEffect')
 
     def do_effect(self, infile: str, effect: EffectType, outfile: str) -> str:
+        """Applies an effect to an audio file
+
+        Args:
+            infile (str): path to audio file.
+            effect (EffectType): the ffect to apply. See enum.
+            outfile (str): Path to new audio file with effect applied.
+
+        Raises:
+            AudioEffectTypeException: if unknown or unsupported.
+
+        Returns:
+            str: Path to new audio file with effect applied.
+        """
         if effect == EffectType.NONE_:
             return infile
         elif effect == EffectType.REVERB:
@@ -49,37 +66,41 @@ class AudioEffect:
         elif effect == EffectType.BITCRUSH:
             return self.bitcrush(infile, outfile)
         else:
-            self.logger.error(f"EffectType not supported. Type == {effect}")
-            raise Exception(f"EffectType not supported. Type == {effect}")
+            self.logger.error("EffectType not supported. Type == %s", effect)
+            raise AudioEffectTypeException(f"EffectType not supported. Type == {effect}")
 
     def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
-        # TODO: Pedalboard have implemented timestrech but cannot make it work
+        """TODO: Pedalboard have implemented timestrech but cannot make it work
         #  - Time_stretch is a function instead of class (expected)
         # board = Pedalboard([time_stretch(stretch_factor=stretch)])
         # self._applyBoard(board, infile, outfile)
-        # return outfile
+        # return outfile"""
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
         sf.write(outfile, yw, sr, format='wav')
         return outfile
 
     def pitch(self, infile: str, outfile: str, pitch: float) -> str:
+        """Pitch effect"""
         y, sr = sf.read(infile)
         yw = pyrb.pitch_shift(y, sr, pitch)
         sf.write(outfile, yw, sr, format='wav')
         return outfile
 
     def reverb(self, infile: str, outfile: str) -> str:
+        """Reverb effect"""
         board = Pedalboard([Chorus(), Reverb(room_size=0.25)])
-        self._applyBoard(board, infile, outfile)
+        self._apply_board(board, infile, outfile)
         return outfile
-    
+
     def phaser(self, infile: str, outfile: str) -> str:
+        """Phaser effect"""
         board = Pedalboard([Phaser(feedback=0, depth=.8, rate_hz=1.2, mix=.7)])
-        self._applyBoard(board, infile, outfile)
+        self._apply_board(board, infile, outfile)
         return outfile
 
     def reverse(self, infile, outfile) -> str:
+        """Reverse effect"""
         with wave.open(infile, "rb") as input_wave:
             # Read the wave file
             samples = np.frombuffer(input_wave.readframes(input_wave.getnframes()), dtype=np.int16)
@@ -95,23 +116,23 @@ class AudioEffect:
                 output_wave.setframerate(sample_rate)
                 output_wave.writeframes(reversed_samples)
         return outfile
-    
+
     def bitcrush(self, infile, outfile) -> str:
+        """Bitcrush effect"""
         board = Pedalboard([
-            LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=500,  resonance=0.75), 
+            LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=500,  resonance=0.75),
             Gain(gain_db=10),
             Bitcrush(5),
             Distortion(26), Gain(gain_db=-22)
             ])
-        self._applyBoard(board, infile, outfile)
+        self._apply_board(board, infile, outfile)
         return outfile
-    
-    def _applyBoard(self, board, infile, outfile) -> None:
+
+    def _apply_board(self, board, infile, outfile) -> None:
+        """Applies Pedalboard effect and writes new audio to file"""
         try:
             # Open an audio file for reading, just like a regular file:
             with AudioFile(infile) as f:
-            # with AudioFile('/home/pi/Source/ControlPanelMasterPy/ControlPanelMasterPy/playground/music.wav') as f:
-
                 # Open an audio file to write to:
                 with AudioFile(outfile, 'w', f.samplerate, f.num_channels) as o:
 
@@ -125,6 +146,12 @@ class AudioEffect:
                         # Write the output to our output file:
                         o.write(effected)
                         o.flush()
-            a = 434
         except Exception as e:
             self.logger.error(e)
+
+
+class AudioEffectTypeException(Exception):
+    """
+    Raised when an unknown or unsupported EffectType
+    is used.
+    """

@@ -2,7 +2,7 @@
 
 import unittest  # noqa
 from time import time, sleep
-from daemon.slidingWindowClass import SlidingWindow
+from daemon.sliding_window import SlidingWindow
 
 
 class Test_SlidingWindow(unittest.TestCase):

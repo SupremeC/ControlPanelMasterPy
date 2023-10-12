@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-
-import logging
-import logging.handlers as handlers
+"""Configures built-in logger"""
 
 import sys
+import logging
+from logging import handlers
 
-#     '%(asctime)s-%(msecs)d %(name)s-%(levelname)s-%(message)s')
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)

@@ -44,6 +44,9 @@ sudo apt install setserial
 #Console "GUI"
 pip install "textual"
 
+#communication between Client and Daemon
+pip install Pyro5
+
 #SERIAL (with COBS encoding)
 pip install pyserial
 pip install cobs

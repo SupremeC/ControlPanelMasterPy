@@ -1,33 +1,76 @@
+"""View"""
 import urwid as u
-from datetime import datetime
-from staticContent import StaticContent
+from client.static_content import StaticContent
+from client.bashscripts import BashScripts
 
 
-# TODO  custom signals (connects pyro code to Widget)
-# Should Overview be a class or a custom widget (if widget I dont need a build() method)
+class SelectableText(u.Text):
+    """
+    dummy class. Only purpose is to make the listbox content scrollable
+    The 'magic' is setting '_selectable = True'
+    """
+    _selectable = True
 
-class LogView(object):
+    def keypress(self, _, key):
+        """def keypress(self, size, key):"""
+        return key
+
+
+
+class LogView:
+    """View"""
     loopref: u.MainLoop
-    title: str
-    obj_text: u.Text
+    walker: u.SimpleListWalker
+    listbox: u.ListBox
 
     def __init__(self):
-        self.title = "LogView"
         pass
 
+
     def set_loopref(self, ref) -> None:
+        """loop reference"""
         self.loopref = ref
 
+
     def del_loopref(self) -> None:
+        """Delete loop reference. Because memory cleanup"""
         self.loopref = None
 
+
     def update(self):
-        now = datetime.now()
-        self.obj_text.set_text(self.title + str(now.second))
+        """Do shit here to update values in View"""
+        #now = datetime.now()
+        #self.obj_text.set_text(self.file_content + str(now.second))
+        # self.obj_text.set_text(self.get_text_from_logfile())
+
+
+    def get_text_from_logfile(self, nr_of_lines) -> str:
+        "Read logfile and return the last lines (tail)"
+        return BashScripts.tail(
+            "/home/david/source/cpPy/ControlPanelMasterPy/logs.log",
+            nr_of_lines, 0)
 
 
     def build(self):
-        self.obj_text = u.Text(self.title)
-        body = u.Pile([self.obj_text])
-        fill = u.Filler(body)
-        return u.AttrMap(u.Frame(body=fill, header=StaticContent.header(), footer=StaticContent.footer()), 'bg')
+        """Build widgets in this View
+
+        Returns:
+            u.Frame: Frame containing View widgets
+        """
+        lines_to_read = 80
+        self.walker = u.SimpleFocusListWalker([])
+        self.listbox = u.ListBox(self.walker)
+        listbox = u.AttrMap(self.listbox, "listbox")
+        listbox = u.LineBox(listbox, f"Log file (-tail {lines_to_read})")
+        textlines = self.get_text_from_logfile(lines_to_read)
+        for line in textlines:
+            self.walker.append(
+                u.AttrMap(SelectableText(line.strip(), wrap="clip"), "listbox", "reveal focus"))
+        self.listbox.set_focus(self.walker.positions(True)[0])
+
+        # ===============
+        listbox = u.Columns([listbox])
+        # toprow = u.BoxAdapter(toprow, 10)
+        # listbox = u.Filler(listbox)
+        return u.AttrMap(u.Frame(
+            body=listbox, header=StaticContent.header(), footer=StaticContent.footer()), 'bg')

@@ -1,10 +1,28 @@
-# saved as greeting-client.py
-import Pyro4
+import time
+from Pyro5.api import Proxy
+import a.a_include
 
-ipAddressServer = "127.0.0.1" # TODO add your server remote IP here
+a.a_include.get_workingdir()
+exit()
 
-# Works for Python3, see edit above for notes on Python 2.x
-name = input("What is your name? ").strip()
+print("First make sure one of the gui servers is running.")
+print("Enter the object uri that was printed:")
+uri = input().strip()
+guiserver = Proxy(uri)
 
-greetingMaker = Pyro4.core.Proxy('PYRO:Greeting@' + ipAddressServer + ':9090')
-print(greetingMaker.get_fortune(name))   # call method normally
+guiserver.message("Hello there!")
+time.sleep(0.5)
+guiserver.message("How's it going?")
+time.sleep(1)
+
+for i in range(20):
+    guiserver.message(f"Counting {0}".format(i))
+
+server_answer = guiserver.say_hello()
+print("server said--> " + str(server_answer))
+
+guiserver.message("now calling the sleep method with 5 seconds")
+guiserver.sleep(10)
+guiserver.message("How's it going?")
+guiserver.stoopp()
+print("client stopped")

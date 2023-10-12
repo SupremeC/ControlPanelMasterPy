@@ -1,24 +1,18 @@
-#!/usr/bin/env python
-
-"""
-import sys
-from pathlib import Path
-sys.path[0] = str(Path(sys.path[0]).parent)
-"""
-
-import time
+"""unittest"""
 import unittest  # noqa
 from datetime import datetime, timedelta
-
-from daemon.controlPanel_class import ControlPanel
-from daemon.packet import ErrorType, HWEvent, Packet  # noqa
+from daemon.controlpanel_class import ControlPanel
 
 
-class Test_timeToSendHello(unittest.TestCase):
-    def test_None_true(self):
+
+
+class TestTimeToSendHello(unittest.TestCase):
+    """test"""
+    def test_firsteverhello_true(self):
+        """test_None_true"""
         # arrange
         cp = ControlPanel()
-        cp._lastSentHello = None
+        cp._last_sent_hello = None
 
         # act
         actual = cp.time_to_send_hello()
@@ -27,9 +21,10 @@ class Test_timeToSendHello(unittest.TestCase):
         self.assertTrue(actual)
 
     def test_recent_false(self):
+        """test_recent_false"""
         # arrange
         cp = ControlPanel()
-        cp._lastSentHello = datetime.now() - timedelta(seconds=10)
+        cp._last_sent_hello = datetime.now() - timedelta(seconds=10)
 
         # act
         actual = cp.time_to_send_hello()
@@ -38,9 +33,10 @@ class Test_timeToSendHello(unittest.TestCase):
         self.assertFalse(actual)
 
     def test_2minut_true(self):
+        """test_2minut_true"""
         # arrange
         cp = ControlPanel()
-        cp._lastSentHello = datetime.now() - timedelta(seconds=120)
+        cp._last_sent_hello = datetime.now() - timedelta(seconds=120)
 
         # act
         actual = cp.time_to_send_hello()

@@ -1,14 +1,17 @@
-#!/usr/bin/env python
+"""Packet is the class used to send and receive data from Arduino
+"""
+
 
 from datetime import datetime
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum  # , verify, UNIQUE
 
 logger = logging.getLogger('daemon.PacketSerial.Packet')
 
 # @verify(UNIQUE)
 class HWEvent  (IntEnum):
+    """HWEvent"""
     UNDEFINED = 0,
     LED = 1
     I2CALED = 2
@@ -28,7 +31,8 @@ class HWEvent  (IntEnum):
 
 # @verify(UNIQUE)
 class ErrorType (IntEnum):
-    NONE_ = 0,
+    """Packet Error enum"""
+    NONE_ = 0
     UNKNOWNEVENT = 1
     LEDINVALIDVALUE = 2
     INVALIDTARGET = 3
@@ -41,12 +45,14 @@ class ErrorType (IntEnum):
 
 # @verify(UNIQUE)
 class BlinkTarget (IntEnum):
+    """Special Target. Affects multiple LEDs"""
     AUDIO_PRESETBTNS = 200
     SPEAKER_LEDS = 201
 
 
 class PwmBoard (IntEnum):
-    NONE_ = 0,
+    """PwmBoard"""
+    NONE_ = 0
     I2CALED = HWEvent.I2CALED
     I2CBLED = HWEvent.I2CBLED
     I2CCLED = HWEvent.I2CCLED
@@ -54,42 +60,61 @@ class PwmBoard (IntEnum):
 
 @dataclass
 class Packet:
-    _created: datetime
-    hwEvent: HWEvent = HWEvent.UNDEFINED
+    """
+    Packet class. Supported struct to comunicate with Arduino over Serial
+
+    Args:
+        0 args: Init Packet with default values
+            hw_event = HWEvent.UNDEFINED
+            target = 0
+            error = ErrorType.NONE_
+            val = 0
+        1 args:
+            bytes. The bytes are parsed into Packet values
+        3 args:
+            *1st: hw_event
+            *2nd: target
+            *3rd: value
+    """
+    created: datetime
+    hw_event: HWEvent = HWEvent.UNDEFINED
     target: int = 0
     error: ErrorType = ErrorType.NONE_
     val: int = 0
 
     def __init__(self, *args):
-        self._created = datetime.now()
+        self.created = datetime.now()
         if len(args) == 0:
             return
         if len(args) == 1:
             self.parse_bytes(args[0])
             return
         if len(args) == 3:
-            self.hwEvent = args[0]
+            self.hw_event = args[0]
             self.target = args[1]
             self.val = args[2]
 
-    def parse_bytes(self, bytes: bytes) -> None:
+
+    def parse_bytes(self, byte_arr: bytes) -> None:
         """ Parse bytes into packet values"""
         try:
-            self.hwEvent = HWEvent(bytes[0])
-            self.target = bytes[1]
-            self.error = ErrorType(bytes[2])
-            self.val = int.from_bytes(bytes[-2:],
+            self.hw_event = HWEvent(byte_arr[0])
+            self.target = byte_arr[1]
+            self.error = ErrorType(byte_arr[2])
+            self.val = int.from_bytes(byte_arr[-2:],
                                       byteorder='little', signed=False)
-        except Exception as e:
+        except IndexError as e:
             logger.error(e)
             self.error = ErrorType.FAILEDTOPARSEPACKET
-            self.hwEvent = HWEvent.UNDEFINED
+            self.hw_event = HWEvent.UNDEFINED
             self.target = 0
             self.val = 0
 
+
     def as_bytes(self) -> bytes:
+        """return Packet converted to bytes"""
         ba = bytearray()
-        ba.extend(int(self.hwEvent).to_bytes(
+        ba.extend(int(self.hw_event).to_bytes(
             length=1, byteorder='little', signed=False))
         ba.extend(self.target.to_bytes(
             length=1, byteorder='little', signed=False))
@@ -98,24 +123,13 @@ class Packet:
         ba.extend(self.val.to_bytes(
             length=2, byteorder='little', signed=False))
         return bytes(ba)
-    
+
+
     def as_human_friendly_str(self) -> str:
-        r = self._created.strftime("%H:%M:%S_")
-        r += self.hwEvent.name.ljust(9, ' ') +"_"
-        r += f"t={str(self.target).ljust(3, ' ')}_v={self.val}_err={'' if self.error == ErrorType.NONE_ else self.error.name}"
+        """Packet as a human-friendly readable string"""
+        r = self.created.strftime("%H:%M:%S") + "   "
+        r += self.hw_event.name.ljust(9, ' ') +"_"
+        r += f"t={str(self.target).ljust(3, ' ')}_v={self.val}"
+        if(self.error is not None and self.error != ErrorType.NONE_):
+            r += f'  error={self.error.name}'
         return r
-
-
-'''
-    def __str__(self):
-        format("HWEvent: %s(%d)" /
-               "Target: %s" /
-               "Error: %s(%d)" /
-               "Val: %s",
-               self.hwEvent.name, self.hwEvent.value,
-               self.target,
-               self.error.name, self.error.value,
-               self.val)
-'''
-
-

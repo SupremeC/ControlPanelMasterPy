@@ -6,7 +6,6 @@ import sys
 import os
 import os.path
 import time
-import atexit
 import signal
 
 
@@ -15,7 +14,6 @@ class DaemonSC:
     Usage: subclass the daemon class and override the run() method."""
 
     def __init__(self, pidfile):
-        self._controlPanel = None
         self.pidfile = pidfile
         self.kill_now = False
         signal.signal(signal.SIGINT, self.exit_gracefully)
@@ -28,8 +26,8 @@ class DaemonSC:
             if pid > 0:
                 # exit first parent
                 sys.exit(0)
-        except OSError as err:
-            sys.stderr.write('fork #1 failed: {0}\n'.format(err))
+        except OSError as error:
+            sys.stderr.write(f'fork #1 failed: {error}\n')
             sys.exit(1)
         DaemonSC.print_process_info(pid)
 
@@ -44,22 +42,22 @@ class DaemonSC:
             if pid > 0:
                 # exit from second parent
                 sys.exit(0)
-        except OSError as err:
-            sys.stderr.write('fork #2 failed: {0}\n'.format(err))
+        except OSError as error:
+            sys.stderr.write(f'fork #2 failed: {error}\n')
             sys.exit(1)
         DaemonSC.print_process_info(pid)
         #atexit.register(self.delpid)
 
         # write pidfile
         try:
-            f = open(self.pidfile, 'w+')
+            f = open(self.pidfile, 'w+', encoding="utf-8")
             f.write(str(os.getpid()) + '\n')
             f.flush()
             f.close()
             if not os.path.isfile(self.pidfile):
                 sys.stderr.write('pidfile missing. \n')
         except Exception as error:
-            sys.stderr.write('write pidfile failed: {0}\n'.format(err))
+            sys.stderr.write(f'write pidfile failed: {error}\n')
             raise
 
         # try:
@@ -83,21 +81,20 @@ class DaemonSC:
 
     @staticmethod
     def print_process_info(p_pid: int):
-        # pid greater than 0 represents
-        # the parent process
+        """pid greater than 0 represents the parent process"""
         if p_pid > 0 :
             print("I am parent process:")
             print("Process ID:", os.getpid())
             print("Child's process ID:", p_pid)
 
-        # pid equal to 0 represents
-        # the created child process
+        # pid equal to 0 represents the created child process
         else :
             print("\nI am child process:")
             print("Process ID:", os.getpid())
             print("Parent's process ID:", os.getppid())
 
     def delpid(self):
+        """Deletes PID file"""
         os.remove(self.pidfile)
 
     def start(self):
@@ -106,9 +103,9 @@ class DaemonSC:
         try:
             message = "trying to read pidfile {0}\n"
             sys.stdout.write(message.format(self.pidfile))
-            with open(self.pidfile, 'r') as pf:
+            with open(self.pidfile, 'r', encoding="utf-8") as pf:
                 pid = int(pf.read().strip())
-        except IOError as err:
+        except IOError:
             pid = None
 
         if pid:
@@ -129,11 +126,11 @@ class DaemonSC:
         pid = 0
         try:
             if os.path.isfile(self.pidfile):
-                pf = open(self.pidfile, 'r')
+                pf = open(self.pidfile, 'r', encoding="utf-8")
                 pid = int(pf.read().strip())
                 pf.close()
         except Exception as error:
-            sys.stderr.write('stop() reading pidfile failed: {0}\n'.format(err))
+            sys.stderr.write(f'stop() reading pidfile failed: {error}\n')
         # try:
         #     with open(self.pidfile, 'r') as pf:
         #         pid = int(pf.read().strip())
@@ -171,10 +168,11 @@ class DaemonSC:
         It will be called after the process has been daemonized by
         start() or restart()."""
 
-    def exit_gracefully(self, signum, frame):
+    def exit_gracefully(self, signum, _):
+        """Cleans up and set Kill flag"""
         self.kill_now = True
         self.cleanup(signum, signal.Signals(signum).name)
 
-    def cleanup(self):
+    def cleanup(self, signum, signame):
         """You should override this method when you subclass Daemon.
         It will be called when 'stop()' is called"""

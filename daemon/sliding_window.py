@@ -1,6 +1,9 @@
-from time import time, sleep
+"""SlidingWindow implementation"""
+
+from time import time
 
 
+# pylint: disable=R0903
 class SlidingWindow:
     '''
     Rate throttling. Determines how many packages are allowed per timeUnit.
@@ -11,8 +14,8 @@ class SlidingWindow:
     limit_per_timeunit: int
     time_unit: float = 0
 
+    # def __init__(self, capacity, time_unit, forward_callback, drop_callback):
 
-    #def __init__(self, capacity, time_unit, forward_callback, drop_callback):
     def __init__(self, limit_per_timeunit: int, time_unit: float):
         self.limit_per_timeunit: int = limit_per_timeunit
         self.time_unit: float = time_unit
@@ -27,9 +30,10 @@ class SlidingWindow:
             self._pre_count = self._cur_count
             self._cur_count = 0
 
-        ec = (self._pre_count * (self.time_unit - (time() - self._cur_time)) / self.time_unit) + self._cur_count
+        ec = (self._pre_count * (self.time_unit - (time() -
+              self._cur_time)) / self.time_unit) + self._cur_count
 
-        if (ec > self.limit_per_timeunit):
+        if ec > self.limit_per_timeunit:
             return False
 
         self._cur_count += 1

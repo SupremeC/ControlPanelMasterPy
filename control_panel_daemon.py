@@ -27,13 +27,14 @@ Related links:
 """
 
 
+# pylint: disable=W0611
 import sys
 import time
 import logging
 import os
 import daemon.setup_logger as setup_logger # noqa
-from daemon.daemonSuperClass import DaemonSC
-from daemon.controlPanel_class import ControlPanel
+from daemon.daemon_super_class import DaemonSC
+from daemon.controlpanel_class import ControlPanel
 
 logger = logging.getLogger('daemon')
 
@@ -42,28 +43,30 @@ class MyDaemon(DaemonSC):
     """    def __init__(self, pidfile):
             super().__init__(pidfile)
             self._controlPanel = None"""
+    _control_panel: ControlPanel
 
     def run(self):
-        logger.info("Hello from run(). Process ID:" + str(os.getpid()))
-        self._controlPanel = ControlPanel()
-        self._controlPanel.start()
+        logger.info("Hello from run(). Process ID:%s", str(os.getpid()))
+        self._control_panel = ControlPanel()
+        self._control_panel.start()
         logger.debug("Daemon run.init complete")
         while not self.kill_now:
-            self._controlPanel.process()
-            time.sleep(1)
+            self._control_panel.process()
+            time.sleep(.1)
         logger.debug("exiting run() method")
+        self._control_panel.stop()
 
     def cleanup(self, signum, signame):
-        logger.info("cleanup.Process ID:" + str(os.getpid()))
+        logger.info("cleanup.Process ID:%s", str(os.getpid()))
         logger.info("Cleaning up because %s(%d) was received", signame, signum)
-        self._controlPanel.stop()
+        self._control_panel.stop()
 
 
 if __name__ == "__main__":
     daemon = MyDaemon('/tmp/daemon-controlpanel.pid')
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
-            print("Starting %s Daemon..." % sys.argv[0])
+            print(f"Starting {sys.argv[0]} Daemon...")
             daemon.start()
         elif 'stop' == sys.argv[1]:
             daemon.stop()
@@ -76,5 +79,5 @@ if __name__ == "__main__":
             sys.exit(2)
         sys.exit(0)
     else:
-        print("usage: %s start|stop|restart" % sys.argv[0])
+        print(f"usage: {sys.argv[0]} start|stop|restart")
         sys.exit(2)

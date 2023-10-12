@@ -1,35 +1,29 @@
 import sys
-sys.path.append("..")
-
 import urwid as u
 import daemon.packet
 
+sys.path.append("..")
+
+
 class StaticContent:
+    """helper methods"""
     @staticmethod
     def header():
-        headerWidgets = []
+        """header"""
+        header_widgets = []
         for w in ["[F1]Overview", "[F2]FakeIncomingPacket", "[F3] SendCommand", "[F4]Logs"]:
-            headerWidgets.append(u.AttrMap(u.Text(w), "topheader"))
-        return u.Columns(headerWidgets) 
+            header_widgets.append(u.AttrMap(u.Text(w), "topheader"))
+        return u.Columns(header_widgets)
 
 
     @staticmethod
     def footer():
+        """footer"""
         return u.AttrMap(u.Text(" Q to exit"), "footer")
-    
-    @staticmethod
-    def cute_button(label, callback=None, data=None):
-        """
-        Urwid's default buttons are shit, and they have ugly borders.
-        This function returns buttons that are a bit easier to love.
-        """
-        button = u.Button("", callback, data)
-        super(u.Button, button).__init__(
-            u.SelectableIcon(label))
-        return button
-    
+
+
     staticmethod
-    def remove_overlays(loopref):
+    def remove_overlays(loopref) -> None:
         """
         Remove ALL urwid.Overlay objects which are currently covering the base
         widget.
@@ -40,11 +34,25 @@ class StaticContent:
             except:
                 break
 
+
+    @staticmethod
+    def cute_button(label, callback=None, data=None):
+        """
+        Urwid's default buttons are shit, and they have ugly borders.
+        This function returns buttons that are a bit easier to love.
+        """
+        button = u.Button("", callback, data)
+        super(u.Button, button).__init__(
+            u.SelectableIcon(label))
+        return button
+
+
     @staticmethod
     def packet_to_urwid(packet: daemon.packet.Packet):
+        """Prettify Packet as Urwid text widgets"""
         texts = []
-        texts.append(f"Created: {packet._created}")
-        texts.append(f"HWEvent: {packet.hwEvent.name}")
+        texts.append(f"Created: {packet.created}")
+        texts.append(f"HWEvent: {packet.hw_event.name}")
         texts.append(f"Target : {packet.target}")
         texts.append(f"Val: {packet.val}")
         texts.append(f"Error: {packet.error.name}")
@@ -53,7 +61,8 @@ class StaticContent:
         for e in texts:
             w.append(u.AttrMap(u.Text(e), "style_TODO"))
         return w
-    
+
+
     @staticmethod
     def dialog_yesno(classref, loopref, title, message, callback_yes, callback_no):
         """
@@ -91,7 +100,7 @@ class StaticContent:
         This can delete either a thread or a post.
         """
         buttons = []
-        if isinstance(message, str) and message != None:
+        if isinstance(message, str) and message is not None:
             buttons.append(u.Text(("bold", message)))
         elif isinstance(messagewidgets, list):
             buttons += messagewidgets
@@ -113,8 +122,10 @@ class StaticContent:
 
 
 class OptionsMenu(u.LineBox):
+    """Extends base class to handle keypress for Overlay dialogs"""
     loopref = None
     def keypress(self, size, key):
+        """handle keypress events"""
         keyl = key.lower()
         if keyl in ("esc", "ctrl g"):
             self.loopref.widget = self.loopref.widget[0]
@@ -133,4 +144,3 @@ class OptionsMenu(u.LineBox):
 
         elif keyl in ("right", "l"):
             return self.keypress(size, "enter")
-

@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
-"""
+
 import sys
 from pathlib import Path
 sys.path[0] = str(Path(sys.path[0]).parent)
-"""
+
 
 
 from typing import List
 from daemon.packet import Packet, HWEvent, ErrorType   # noqa
-from daemon.ctrlsClass import Analogctrl, HwCtrls,Hwctrl, PwmBoard, SWITCH_OFF, SWITCH_ON, NO_LED
+from daemon.ctrls_class import Analogctrl, HwCtrls,Hwctrl, PwmBoard, SWITCH_OFF, SWITCH_ON, NO_LED, LEDCtrl
 import unittest   # noqa
 
 
@@ -38,7 +38,7 @@ class Test_Hwctrl(unittest.TestCase):
 
     def test_setState(self):
         # act
-        a = Hwctrl(pin=2, state= SWITCH_ON, ledboard=PwmBoard.I2CALED, ledPin=8, section="test")
+        a = Hwctrl(pin=2, state= SWITCH_ON, section="test")
         aPackets = a.set_state(False)
         b = Hwctrl(pin=2, state= SWITCH_OFF, section="test")
         bPackets = b.set_state(True)
@@ -50,23 +50,17 @@ class Test_Hwctrl(unittest.TestCase):
         self.assertEqual(b.state, True, "b case")
         self.assertEqual(c.state, True, "c case")
 
-        # assert return value
-        self.assertTrue(len(aPackets) > 0, "nr of packets was wrong")
-        self.assertTrue(aPackets[0].hwEvent == HWEvent.I2CALED, "HwEvent was wrong")
-        self.assertTrue(aPackets[0].target == 8, "Target was wrong")
-        self.assertTrue(len(bPackets) <= 0, "nr of packets should be 0")
-
-    def test_invertInt(self):
-        self.assertEqual(Hwctrl._invert_int(2, 0, 10), 8)
-        self.assertEqual(Hwctrl._invert_int(7, 0, 100), 93)
-        self.assertEqual(Hwctrl._invert_int(50, 0, 100), 50)
-        self.assertEqual(Hwctrl._invert_int(0, -10, 10), 0)
-        self.assertEqual(Hwctrl._invert_int(-11, -10, 10), 10) # outside range
-        self.assertEqual(Hwctrl._invert_int(40, -20, 10), -20) # outside range
+    def test_invert_int(self):
+        self.assertEqual(LEDCtrl._invert_int(2, 0, 10), 8)
+        self.assertEqual(LEDCtrl._invert_int(7, 0, 100), 93)
+        self.assertEqual(LEDCtrl._invert_int(50, 0, 100), 50)
+        self.assertEqual(LEDCtrl._invert_int(0, -10, 10), 0)
+        self.assertEqual(LEDCtrl._invert_int(-11, -10, 10), 10) # outside range
+        self.assertEqual(LEDCtrl._invert_int(40, -20, 10), -20) # outside range
 
         # roundTrip
-        a = Hwctrl._invert_int(2, 0, 10)
-        b = Hwctrl._invert_int(a, 0, 10)
+        a = LEDCtrl._invert_int(2, 0, 10)
+        b = LEDCtrl._invert_int(a, 0, 10)
         self.assertEqual(2, b)
         pass
 
@@ -74,19 +68,13 @@ class Test_Hwctrl(unittest.TestCase):
 class TestAnalogCtrl(unittest.TestCase):
     def test_setState(self):
         # act
-        a = Analogctrl(pin=2, state=222, ledboard=PwmBoard.I2CCLED, ledPin=8, section="test")
+        a = Analogctrl(pin=2, state=222, section="test")
         aPackets = a.set_state(3001)
-        b = Analogctrl(pin=3, state= SWITCH_ON, ledboard=PwmBoard.I2CCLED, ledPin=NO_LED, section="test")
+        b = Analogctrl(pin=3, state= SWITCH_ON, section="test")
         bPackets = b.set_state(0)
         # assert
         self.assertEqual(a.state, 3001)
         self.assertEqual(b.state, 0)
-
-        # assert return value
-        self.assertTrue(len(aPackets) > 0, "nr of packets was wrong")
-        self.assertTrue(aPackets[0].hwEvent == HWEvent.I2CCLED, "HwEvent was wrong")
-        self.assertTrue(aPackets[0].target == 8, "Target was wrong")
-        self.assertTrue(len(bPackets) == 0, "nr of packets should be 0")
 
 
 class TestAuxCtrls(unittest.TestCase):
@@ -108,10 +96,10 @@ class TestAuxCtrls(unittest.TestCase):
     def test_set_allLeds(self):
         # arrange
         a = HwCtrls()
-        ctrls_flatList = a._getAllCtrls_flat()
+        ctrls_flatList = a._get_all_ctrls_flat()
 
         # act
-        ps = a.set_allLeds(False)
+        ps = a.set_all_leds(False)
         
         # assert
         self.assertTrue(len(ps) > 20)
@@ -119,28 +107,33 @@ class TestAuxCtrls(unittest.TestCase):
     def test_AssertUniquePins(self):
         # arrange & act
         a = HwCtrls()
-        ctrls = a._getAllCtrls_flat()
+        ctrls = a._get_all_ctrls_flat()
 
         # assert by adding into Dict. Duplicate values will throw exception
         d = dict()
         for ctrl in ctrls:
+            # Check ctrl pins
             if ctrl.pin != -1:
-                dictKey = "pin="+str(ctrl.pin)
-                if dictKey in d:
-                    raise Exception("Pin already exists")
-                d[dictKey] = "ctrlpin"
+                dictkey = "pin="+str(ctrl.pin)
+                if dictkey in d:
+                    raise DuplicatePinException("Pin already exists")
+                d[dictkey] = "ctrlpin"
 
-            if ctrl.ledboard == PwmBoard.NONE_ and ctrl.ledPin != NO_LED:
-                dictKey = "pin="+str(ctrl.ledPin)
-                if dictKey in d:
-                    raise Exception("LPin already exists")
-                d[dictKey] = "ledPin"
-            elif ctrl.ledboard != PwmBoard.NONE_ and ctrl.ledPin != NO_LED:
-                dictKey = "board="+str(ctrl.ledboard)+", pin="+str(ctrl.ledPin)
-                if dictKey in d:
-                    raise Exception("Pwm.LedPin already exists.\rExisting->" + str(d[dictKey]) +"\rNew->" + str(ctrl))
-                d[dictKey] = ctrl
-        pass
+            # check LED pins on ArduinoMega
+            for led in ctrl.leds:
+                if led.ledboard == PwmBoard.NONE_ and led.led_pin != NO_LED:
+                    dictkey = "pin="+str(led.led_pin)
+                    if dictkey in d:
+                        raise DuplicatePinException("LPin already exists")
+                    d[dictkey] = "led_pin"
+                #  check LED pins on PWMBoards
+                elif led.ledboard != PwmBoard.NONE_ and led.led_pin != NO_LED:
+                    dictkey = "board="+str(led.ledboard)+", pin="+str(led.led_pin)
+                    if dictkey in d:
+                        raise DuplicatePinException(
+                            "Pwm.led_pin already exists.\rExisting->" + 
+                            str(d[dictkey]) +"\rNew->" + str(led))
+                    d[dictkey] = "pwmboard.led_pin"
 
 
     def test_FindCtrl_wrongPinThrowsException(self):
@@ -150,6 +143,12 @@ class TestAuxCtrls(unittest.TestCase):
         # act & assert
         self.assertRaises(Exception, a.get_ctrl, 999)
 
+
+class DuplicatePinException(Exception):
+    """Duplicate pins found in UnitTest"""
+
+class DuplicateLEDPinException(Exception):
+    """Duplicate pins found in UnitTest"""
 
 if __name__ == '__main__':
     unittest.main()

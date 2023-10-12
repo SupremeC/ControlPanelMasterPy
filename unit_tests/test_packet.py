@@ -17,7 +17,7 @@ class Test_PacketContructor(unittest.TestCase):
         p = Packet()
 
         # assert (default values)
-        self.assertEqual(p.hwEvent, HWEvent.UNDEFINED)
+        self.assertEqual(p.hw_event, HWEvent.UNDEFINED)
         self.assertEqual(p.target, 0)
         self.assertEqual(p.error, ErrorType.NONE_)
         self.assertEqual(p.val, 0)
@@ -39,7 +39,7 @@ class Test_PacketContructor(unittest.TestCase):
         p = Packet(bytes(mutable_bytes))
 
         # assert (default values)
-        self.assertEqual(p.hwEvent, hw)
+        self.assertEqual(p.hw_event, hw)
         self.assertEqual(p.target, ta)
         self.assertEqual(p.error, er)
         self.assertEqual(p.val, va)
@@ -54,13 +54,13 @@ class Test_PacketContructor(unittest.TestCase):
         p = Packet(event, target, val)
 
         # assert
-        self.assertEqual(p.hwEvent, event)
+        self.assertEqual(p.hw_event, event)
         self.assertEqual(p.target, target)
         self.assertEqual(p.error, ErrorType.NONE_)
         self.assertEqual(p.val, val)
-        self.assertTrue(p.hwEvent == event, "can I compare Enums with ==")
-        self.assertTrue(p.hwEvent is event, "can I compare Enums with 'is'")
-        self.assertTrue(p.hwEvent == 7, "can I compare Enums with int")
+        self.assertTrue(p.hw_event == event, "can I compare Enums with ==")
+        self.assertTrue(p.hw_event is event, "can I compare Enums with 'is'")
+        self.assertTrue(p.hw_event == 7, "can I compare Enums with int")
 
     def test_asBytes(self):
         # arrange

@@ -1,3 +1,4 @@
+"""AudioCtrl"""
 from pathlib import Path
 from typing import Callable
 import os
@@ -13,6 +14,7 @@ logger = logging.getLogger('daemon.audioCtrl')
 
 
 class AudioCtrl:
+    """AudioCtrl"""
     __rootdir: Path
     __tempdir: Path
     __storagedir: Path
@@ -31,7 +33,7 @@ class AudioCtrl:
 
         AudioCtrl.__create_dir(self.__tempdir)
         AudioCtrl.__create_dir(self.__storagedir)
-        self.rec_ctrl = AudioRec(dir = self.__tempdir)
+        self.rec_ctrl = AudioRec(folder = self.__tempdir)
         self.effect_ctrl = AudioEffect()
         # init() channels refers to mono vs stereo, not playback Channel object
         pygame.mixer.init(size = -16, channels = 1, buffer = 2**12)
@@ -64,9 +66,10 @@ class AudioCtrl:
         self.current_filepath = None
         AudioCtrl.__remove_files_in_dir(self.__tempdir)
         return self.rec_ctrl.rec()
-    
+
     def is_recording(self) -> bool:
-            return self.rec_ctrl.recording
+        """Are we currently recording"""
+        return self.rec_ctrl.recording
 
     def stop_recording(self) -> None:
         '''Signals 'Stop' and blocks until recording has stopped.
@@ -79,7 +82,7 @@ class AudioCtrl:
         :Return: bool: True if effectProcessing started, False otherwise
         '''
         if self.effects_running:
-            logger.warn("An effect is already being applied. NOOP")
+            logger.warning("An effect is already being applied. NOOP")
             return False
         if self.current_filepath is None:
             logger.error("Could not apply effect to audio because sound not defined")
@@ -92,25 +95,28 @@ class AudioCtrl:
                 callback=p_callback
             ),
         )
-        self.effects_running = True
         effectthread.start()
-        return True
+        self.effects_running = True
+        return self.effects_running
 
-    def save_to_hwSwitch(self, switch: int) -> str:
+    def save_to_hwswitch(self, switch: int) -> str:
+        """Moves audio file to storage.
+        This effectivly links audio file to HwCtrl button."""
         if self.current_filepath is None or self.current_filepath == "":
-            logger.error("Could not assign audio to Btn because soundfile not defined")
+            logger.error("Could not assign audio to Btn because soundfile path empty")
+            raise AudioFilePathEmptyException(
+                "Could not assign audio to Btn because soundfile path empty")
         destfile = self.__storagedir / f"btn_{switch}.wave"
-        if( self.current_filepath == destfile):
-            return
+        if self.current_filepath == destfile:
+            return self.current_filepath
         if self.file_exist(destfile):
             AudioCtrl.__remove_file(destfile)
-            f = Path(self.current_filepath)
-            self.current_filepath = f.rename(self.__storagedir / f.name)
-            return self.current_filepath
-        else:
-            logger.error("Could not assign audio to Btn because sound does not exist")
+        f = Path(self.current_filepath)
+        self.current_filepath = f.rename(self.__storagedir / f.name)
+        return self.current_filepath
 
-    def __wrapped_apply_effect(self, infile, effect, callback: Callable[[str], None] = None) -> None:
+    def __wrapped_apply_effect(self, infile,effect,
+                               callback: Callable[[str], None] = None) -> None:
         self.effects_running = True
         outfile = str(self.__build_tmp_filename(prefix="tmp_effect"))
         self.current_filepath = self.effect_ctrl.do_effect(infile, effect, outfile)
@@ -121,21 +127,33 @@ class AudioCtrl:
     def __effect_on_done(self) -> None:
         self.effects_running = False
 
+
     def __build_tmp_filename(self, prefix):
         return Path(self.__tempdir, f"{prefix}_{shortuuid.uuid()}.wav")
 
+    @staticmethod
     def file_exist(filepath: str) -> bool:
+        """Does file exist?"""
         return Path(filepath).exists()
-    
+
+    @staticmethod
     def __create_dir(dir_name: Path) -> None:
         dir_name.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
     def __remove_file(p: str) -> None:
         '''Deletes a single file. If the file does not
         exist no error is thrown.'''
-        if Path(p).exists(): p.unlink(missing_ok=True)
+        if Path(p).exists():
+            p.unlink(missing_ok=True)
 
-    def __remove_files_in_dir(dir: Path) -> None:
-        [f.unlink() for f in dir.glob("*") if f.is_file()]
+    @staticmethod
+    def __remove_files_in_dir(folder: Path) -> None:
+        [f.unlink() for f in folder.glob("*") if f.is_file()]
 
-        
+
+class AudioFilePathEmptyException(Exception):
+    """
+    Raised when an unknown or unsupported EffectType
+    is used.
+    """

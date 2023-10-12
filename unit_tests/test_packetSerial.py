@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 
+
 import collections
 from queue import Queue
-import daemon.packetSerial
+import daemon.packet_serial
 import daemon.setup_logger
 from daemon.packet import Packet, HWEvent, ErrorType # noqa
 import unittest   # noqa
@@ -11,7 +12,7 @@ import unittest.mock as mock
 from unittest.mock import ANY
 from datetime import datetime, timedelta
 import time
-from daemon.slidingWindowClass import SlidingWindow
+from daemon.sliding_window import SlidingWindow
 import serial
 
 
@@ -26,7 +27,7 @@ class Test_Threading(unittest.TestCase):
         # arrange
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        ps = daemon.packetSerial.PacketSerial(
+        ps = daemon.packet_serial.PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue)
         # mock_serial.is_open = True
 
@@ -64,7 +65,7 @@ class Test_Threading(unittest.TestCase):
         mock_serial_comports.return_value = ports
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        ps = daemon.packetSerial.PacketSerial(
+        ps = daemon.packet_serial.PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue)
 
         # act
