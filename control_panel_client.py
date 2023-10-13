@@ -1,15 +1,21 @@
 """GUI CLient"""
 import urwid as u
+from Pyro5.api import Proxy, register_class_to_dict, register_dict_to_class
 from client.overview import OverView
 from client.logview import LogView
+from daemon.pyro_daemon import PyroDaemon
+from daemon.packet import Packet
 
 
+PYRO_DAEMON_URI = PyroDaemon.get_uri_fromfile()
+cp_daemon = Proxy(PYRO_DAEMON_URI)
+register_dict_to_class("pyro-custom-Packet", Packet.packet_dict_to_class)
+register_class_to_dict(Packet, Packet.packet_class_to_dict)
 
 views = {
-    "overview": OverView(), 
-    "logview": LogView()
+    "overview": OverView(cp_daemon), 
+    "logview": LogView(cp_daemon)
 }
-
 
 class App:
     """GUI App"""

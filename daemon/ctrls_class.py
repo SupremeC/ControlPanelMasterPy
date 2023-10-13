@@ -172,7 +172,7 @@ class HwCtrls:
         for ctrl in self.ctrls:
             if ctrl.pin == pin:
                 return ctrl
-        raise CtrlNotFoundException(f"No top-level Ctrl found with pin={pin}")
+        raise CtrlNotFoundException(pin, f"No top-level Ctrl found with pin={pin}")
 
     def get_ctrl_by_name(self, name:str) -> Hwctrl:
         """
@@ -185,7 +185,7 @@ class HwCtrls:
         found_ctrl = self.get_slavectrl(pin_that_does_not_exist, name)
         if found_ctrl is not None:
             return found_ctrl
-        raise CtrlNotFoundException(f"No Ctrl (searching all) found with name={name}")
+        raise CtrlNotFoundException(-1, f"No Ctrl (searching all) found with name={name}")
 
 
     def get_slavectrl(self, pin: int, name:str = None) -> Hwctrl:
@@ -200,7 +200,7 @@ class HwCtrls:
             found_ctrl = HwCtrls.__get_slavectrl(ctrl, pin, name)
             if found_ctrl is not None:
                 return found_ctrl
-        raise CtrlNotFoundException(f"No Ctrl (searching all) found with pin={pin}")
+        raise CtrlNotFoundException(pin, f"No Ctrl (searching all) found with pin={pin}")
 
     @staticmethod
     def __get_slavectrl(ctrl: Hwctrl, pin: int, name:str = None) -> Hwctrl:
@@ -404,6 +404,13 @@ class CtrlNotFoundException(Exception):
     Raised when searching for a HwCtrl and not finding
     a matching HwCtrl
     """
+    def __init__(self, pin:int, msg: str = None):
+        self.pin = pin
+        self.msg = (f"pin={pin}. {msg}"
+                    if msg is not None else
+                    f"pin={pin}. Ctrl with pin={pin} was not found")
+        super().__init__(self.msg)
+
 
 class LEDException(Exception):
     """

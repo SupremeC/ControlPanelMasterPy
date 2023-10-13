@@ -23,8 +23,9 @@ class LogView:
     walker: u.SimpleListWalker
     listbox: u.ListBox
 
-    def __init__(self):
-        pass
+    def __init__(self, cp_daemon):
+        self.title = "LogView"
+        self.cp_daemon = cp_daemon
 
 
     def set_loopref(self, ref) -> None:

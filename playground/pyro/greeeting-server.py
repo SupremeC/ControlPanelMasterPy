@@ -1,7 +1,11 @@
 # saved as greeting-server.py
 import threading
 import time
-from Pyro5.api import expose, Daemon
+import datetime
+from array import array
+from typing import List
+from Pyro5.api import expose, Daemon, config, register_class_to_dict, register_dict_to_class
+from testclass import ErrorType, HWEvent, Packet
 
 
 class MyOwnDaemon:
@@ -14,10 +18,15 @@ class MyOwnDaemon:
         self.pyro_thread.start()
         self.pyro_thread.started.wait()
 
+        # serialization
+        register_dict_to_class("pyro-custom-Packet", Packet.packet_dict_to_class)
+        register_class_to_dict(Packet, Packet.packet_class_to_dict)
+
         #print stuff
         print("Pyro server started. Using Pyro worker thread.")
         print("Use the command line client to send messages.")
         print(f"Pyro object uri = {self.pyro_thread.uri}")
+
 
     def run(self):
         """MainLoop"""
@@ -35,23 +44,25 @@ class MyOwnDaemon:
         return "Well hello there stranger!"
 
     @expose
-    def message(self, messagetext):
+    def sendmessage(self) -> List[Packet]:
         """Pyro exposed function"""
-        print("fromClient-->" + messagetext)
-
+        ps = []
+        for i in range(1,4):
+            o = Packet()
+            o.created -= datetime.timedelta(weeks=52*26)
+            o.target = 42
+            o.val = 42123
+            o.hw_event = HWEvent.BOOTMEGA
+            o.error = ErrorType.INVALIDPWMBOARD
+            ps.append(o)
+        return ps
+    
     @expose
-    def sleep(self, duration):
+    def acceptmessage(self, o: Packet) -> None:
         """Pyro exposed function"""
-        print("fromClient--> SLEEP " +str(duration))
-
-    @expose
-    def stoopp(self):
-        """Pyro exposed function"""
-        print("fromClient--> stop ")
-        self.pyro_thread.stoop()
-        print("Pyro stopped! Whoohoo!")
-
-
+        print("type of response object:", type(o))
+        #print(f"No={o.target}, name={o.val}, Created={o.created}, err={o.error}, hwevent={o.hw_event}")
+        print(o)
 
 
 

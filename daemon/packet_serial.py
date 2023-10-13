@@ -58,8 +58,8 @@ class PacketSerial:
         self._sshutdown_flag = threading.Event()
         self._readserial_thread = None
         self._writeserial_thread = None
-        self.last_sent: list[Packet]
-        self.last_received: list[Packet]
+        self.last_sent: list[Packet] = []
+        self.last_received: list[Packet] = []
         self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
 
 
@@ -110,7 +110,7 @@ class PacketSerial:
                 self._writeserial_thread.start()
         except Exception as e:
             logger.error(e)
-            raise
+            # raise
 
 
     def close_connection(self) -> None:

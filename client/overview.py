@@ -1,7 +1,5 @@
 """View"""
 import sys
-from datetime import datetime, timedelta
-import random
 import urwid as u
 import daemon.packet
 from client.static_content import StaticContent
@@ -23,8 +21,9 @@ class OverView(object):
     statuslistbox: u.ListBox
     statuswalker: u.SimpleListWalker
 
-    def __init__(self):
+    def __init__(self, cp_daemon):
         self.title = "OverView"
+        self.cp_remote_daemon = cp_daemon
 
 
     def set_loopref(self, ref) -> None:
@@ -61,14 +60,8 @@ class OverView(object):
         self.rlistbox = u.ListBox(self.rwalker)
         listbox = u.AttrMap(self.rlistbox, "listbox")
         listbox = u.LineBox(listbox, "Last Received Packets")
-        for i in range(6):
-            p = daemon.packet.Packet()
-            p.target = 42 - i
-            p.val = 1
-            p.hw_event = random.choice(list(daemon.packet.HWEvent))
-            p.error = (daemon.packet.ErrorType.INVALIDTARGET
-                        if p.target == 42 else daemon.packet.ErrorType.NONE_)
-            p.created = datetime.now() - timedelta(hours=i, minutes=50-(i*3))
+        remote_data = self.cp_remote_daemon.get_latest_rpackets()
+        for p in remote_data:
             self.rwalker.append(
                 u.AttrMap(u.Button(p.as_human_friendly_str(),
                                    self.packetpress, p), "listbox", "reveal focus"))
@@ -81,14 +74,16 @@ class OverView(object):
         self.slistbox = u.ListBox(self.swalker)
         listbox = u.AttrMap(self.slistbox, "listbox")
         listbox = u.LineBox(listbox, "Last Sent Packets")
-        for i in range(6):
-            p = daemon.packet.Packet()
-            p.target = 42 - i
-            p.val = 1
-            p.hw_event = random.choice(list(daemon.packet.HWEvent))
-            p.error = (daemon.packet.ErrorType.INVALIDTARGET
-                       if p.target == 42 else daemon.packet.ErrorType.NONE_)
-            p.created = datetime.now() - timedelta(hours=i, minutes=50-(i*3))
+        # for i in range(6):
+        #     p = daemon.packet.Packet()
+        #     p.target = 42 - i
+        #     p.val = 1
+        #     p.hw_event = random.choice(list(daemon.packet.HWEvent))
+        #     p.error = (daemon.packet.ErrorType.INVALIDTARGET
+        #                if p.target == 42 else daemon.packet.ErrorType.NONE_)
+        #     p.created = datetime.now() - timedelta(hours=i, minutes=50-(i*3))
+        remote_data = self.cp_remote_daemon.get_latest_spackets()
+        for p in remote_data:
             self.swalker.append(
                 u.AttrMap(u.Button(p.as_human_friendly_str(),
                                    self.packetpress, p), "listbox", "reveal focus"))
@@ -101,18 +96,19 @@ class OverView(object):
         self.statuslistbox = u.ListBox(self.statuswalker)
         listbox = u.AttrMap(self.statuslistbox, "listbox")
         listbox = u.LineBox(listbox, "Control Panel Daemon Status")
-        stuff: dict = {}
-        stuff.update({"ReceiveQueue length": "21"})
-        stuff.update({"SendQueue length": "0"})
-        stuff.update({"LastIncomingHello": "21"})
-        stuff.update({"Volume": "78"})
-        stuff.update({"mainSwitch": "off"})
-        stuff.update({"Ctrl leds": "off"})
-        stuff.update({"Demo theme": "0"})
-        stuff.update({"Recording": "True"})
-        for title, value in stuff.items():
+        remote_data = self.cp_remote_daemon.get_status()
+        # stuff: dict = {}
+        # stuff.update({"ReceiveQueue length": "21"})
+        # stuff.update({"SendQueue length": "0"})
+        # stuff.update({"LastIncomingHello": "21"})
+        # stuff.update({"Volume": "78"})
+        # stuff.update({"mainSwitch": "off"})
+        # stuff.update({"Ctrl leds": "off"})
+        # stuff.update({"Demo theme": "0"})
+        # stuff.update({"Recording": "True"})
+        for title, value in remote_data.items():
             self.statuswalker.append(
-                u.AttrMap(u.Button(title.ljust(25,' ') + value, None, None),
+                u.AttrMap(u.Button(str(title).ljust(25,' ') + str(value), None, None),
                           "listbox", "reveal focus"))
         return listbox
 

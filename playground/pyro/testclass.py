@@ -147,7 +147,7 @@ class Packet:
         }
 
     @staticmethod
-    def packet_dict_to_class(_classname, d):
+    def packet_dict_to_class(classname, d):
         """Pyro: Deserialization of Packet class"""
         o = Packet()
         o.target = d["target-attr"]
