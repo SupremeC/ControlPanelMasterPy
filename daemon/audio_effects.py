@@ -13,9 +13,10 @@ import pyrubberband as pyrb
 import soundfile as sf
 
 
-class EffectType (IntEnum):
-    """EffectTyåe. Can be applied to sound clip
+class EffectType(IntEnum):
+    """EffectType. Can be applied to sound clip
     using AudioEffect class"""
+
     NONE_ = 0
     REVERB = 1
     PHASER = 2
@@ -27,11 +28,11 @@ class EffectType (IntEnum):
     TIMESTRETCH = 8
 
 
-
 class AudioEffect:
     """AudioEffect. Can apply audio effects to audio files"""
+
     def __init__(self) -> None:
-        self.logger = logging.getLogger('daemon.AudioEffect')
+        self.logger = logging.getLogger("daemon.AudioEffect")
 
     def do_effect(self, infile: str, effect: EffectType, outfile: str) -> str:
         """Applies an effect to an audio file
@@ -67,7 +68,9 @@ class AudioEffect:
             return self.bitcrush(infile, outfile)
         else:
             self.logger.error("EffectType not supported. Type == %s", effect)
-            raise AudioEffectTypeException(f"EffectType not supported. Type == {effect}")
+            raise AudioEffectTypeException(
+                f"EffectType not supported. Type == {effect}"
+            )
 
     def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
         """TODO: Pedalboard have implemented timestrech but cannot make it work
@@ -77,14 +80,14 @@ class AudioEffect:
         # return outfile"""
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
-        sf.write(outfile, yw, sr, format='wav')
+        sf.write(outfile, yw, sr, format="wav")
         return outfile
 
     def pitch(self, infile: str, outfile: str, pitch: float) -> str:
         """Pitch effect"""
         y, sr = sf.read(infile)
         yw = pyrb.pitch_shift(y, sr, pitch)
-        sf.write(outfile, yw, sr, format='wav')
+        sf.write(outfile, yw, sr, format="wav")
         return outfile
 
     def reverb(self, infile: str, outfile: str) -> str:
@@ -95,7 +98,7 @@ class AudioEffect:
 
     def phaser(self, infile: str, outfile: str) -> str:
         """Phaser effect"""
-        board = Pedalboard([Phaser(feedback=0, depth=.8, rate_hz=1.2, mix=.7)])
+        board = Pedalboard([Phaser(feedback=0, depth=0.8, rate_hz=1.2, mix=0.7)])
         self._apply_board(board, infile, outfile)
         return outfile
 
@@ -103,7 +106,9 @@ class AudioEffect:
         """Reverse effect"""
         with wave.open(infile, "rb") as input_wave:
             # Read the wave file
-            samples = np.frombuffer(input_wave.readframes(input_wave.getnframes()), dtype=np.int16)
+            samples = np.frombuffer(
+                input_wave.readframes(input_wave.getnframes()), dtype=np.int16
+            )
             sample_rate = input_wave.getframerate()
 
             # Reverse the samples
@@ -119,12 +124,17 @@ class AudioEffect:
 
     def bitcrush(self, infile, outfile) -> str:
         """Bitcrush effect"""
-        board = Pedalboard([
-            LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=500,  resonance=0.75),
-            Gain(gain_db=10),
-            Bitcrush(5),
-            Distortion(26), Gain(gain_db=-22)
-            ])
+        board = Pedalboard(
+            [
+                LadderFilter(
+                    mode=LadderFilter.Mode.HPF24, cutoff_hz=500, resonance=0.75
+                ),
+                Gain(gain_db=10),
+                Bitcrush(5),
+                Distortion(26),
+                Gain(gain_db=-22),
+            ]
+        )
         self._apply_board(board, infile, outfile)
         return outfile
 
@@ -134,8 +144,7 @@ class AudioEffect:
             # Open an audio file for reading, just like a regular file:
             with AudioFile(infile) as f:
                 # Open an audio file to write to:
-                with AudioFile(outfile, 'w', f.samplerate, f.num_channels) as o:
-
+                with AudioFile(outfile, "w", f.samplerate, f.num_channels) as o:
                     # Read one second of audio at a time, until the file is empty:
                     while f.tell() < f.frames:
                         chunk = f.read(int(f.samplerate))

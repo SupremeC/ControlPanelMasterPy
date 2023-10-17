@@ -18,11 +18,12 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
-logger = logging.getLogger('daemon.rec')
+logger = logging.getLogger("daemon.rec")
 
 
 class AudioRec:
     """AudioRec class"""
+
     stream: sd.InputStream = None
     audio_q: queue.Queue
     recording: bool
@@ -34,7 +35,7 @@ class AudioRec:
     device_id: int
     max_rec_time: int
 
-    def __init__(self, folder:str):
+    def __init__(self, folder: str):
         """Init AudioRec
 
         Args:
@@ -46,18 +47,18 @@ class AudioRec:
         self.audio_q = queue.Queue()
         self.metering_q = queue.Queue(maxsize=1)
         self.peak = 0
-        self.device_id = 1 # default device
+        self.device_id = 1  # default device
         self.max_rec_time = 30  # in seconds
 
         self.__dir = folder
-        self.__create_dir(path = self.__dir)
+        self.__create_dir(path=self.__dir)
 
     def rec(self) -> bool:
-        '''starts recording in a new thread. The resulting file
+        """starts recording in a new thread. The resulting file
         path can be found in <AudioRec.rec_filename>.
         Call 'stop()' before reading/altering/deleting file.
         30 seconds is the maximum length
-        '''
+        """
         if self.recording:
             logger.warning("rec() was called but a recording is already running")
             return False
@@ -65,34 +66,34 @@ class AudioRec:
         self._create_stream(device=self.device_id)
         self.recording = True
         self.recordingstart = time.time()
-        filename = tempfile.mktemp(
-            prefix='tmp_rec', suffix='.wav', dir=self.__dir)
+        filename = tempfile.mktemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
         if self.audio_q.qsize() != 0:
-            logger.warning('WARNING: req.Queue not empty!')
+            logger.warning("WARNING: req.Queue not empty!")
         self.thread = threading.Thread(
             target=self.file_writing_thread,
             kwargs=dict(
                 file=filename,
-                mode='x',
+                mode="x",
                 samplerate=int(self.stream.samplerate),
                 channels=self.stream.channels,
                 q=self.audio_q,
-            ), daemon=True
+            ),
+            daemon=True,
         )
         self.rec_filename = filename
         self.thread.start()  # NB: File creation might fail!  For brevity, we don't check for this.
         return True
 
     def stop(self, *args):
-        '''Stops recording process. Might take a while (blocking)...'''
-        self.recording = False # important!
+        """Stops recording process. Might take a while (blocking)..."""
+        self.recording = False  # important!
         if self.stream is not None:
             self.stream.stop()
             self._wait_for_thread()
 
     def set_device(self, dev_id: int) -> None:
-        '''Set the Device ID. Use list_hostapis() and list_devices()
-        to find the ID'''
+        """Set the Device ID. Use list_hostapis() and list_devices()
+        to find the ID"""
         self.device_id = dev_id
 
     @staticmethod
@@ -106,7 +107,7 @@ class AudioRec:
             i = i + 1
         return hosts
 
-    def list_devices(self, hostapi_id:int) -> dict:
+    def list_devices(self, hostapi_id: int) -> dict:
         """Returns information about available audio
         devices having at least 1 Input channel,
         ie, a microphone line.
@@ -121,10 +122,10 @@ class AudioRec:
         hostapi = sd.query_hostapis(hostapi_id)
         device_ids = [
             idx
-            for idx in hostapi['devices']
-            if sd.query_devices(idx)['max_input_channels'] > 0]
-        device_list = [
-            sd.query_devices(idx)['name'] for idx in device_ids]
+            for idx in hostapi["devices"]
+            if sd.query_devices(idx)["max_input_channels"] > 0
+        ]
+        device_list = [sd.query_devices(idx)["name"] for idx in device_ids]
 
         for i in range(len(device_ids)):
             devices[i] = str(device_list[i])
@@ -138,12 +139,15 @@ class AudioRec:
         with sf.SoundFile(**soundfile_args) as f:
             while True:
                 data = q.get()
-                if data is None or time.time() - self.recordingstart > self.max_rec_time:
+                if (
+                    data is None
+                    or time.time() - self.recordingstart > self.max_rec_time
+                ):
                     self.recording = False
                     break
                 f.write(data)
 
-    def __create_dir(self, path:str) -> None:
+    def __create_dir(self, path: str) -> None:
         try:
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -156,15 +160,16 @@ class AudioRec:
         if self.stream is not None:
             self.stream.close()
         self.stream = sd.InputStream(
-            device=device, channels=1, callback=self._audio_callback)
+            device=device, channels=1, callback=self._audio_callback
+        )
         self.stream.start()
 
     def _audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
         # if status.input_overflow:
-            # NB: This increment operation is not atomic, but this doesn't
-            #     matter since no other thread is writing to the attribute.
-            # self.input_overflows += 1
+        # NB: This increment operation is not atomic, but this doesn't
+        #     matter since no other thread is writing to the attribute.
+        # self.input_overflows += 1
         # NB: self.recording is accessed from different threads.
         #     This is safe because here we are only accessing it once (with a
         #     single bytecode instruction).
@@ -177,7 +182,7 @@ class AudioRec:
                 self.previously_recording = False
 
     def _wait_for_thread(self):
-        '''blocking'''
+        """blocking"""
         if self.thread is not None and self.thread.is_alive():
             self.thread.join()
 

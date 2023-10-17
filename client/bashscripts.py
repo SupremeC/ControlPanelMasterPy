@@ -7,8 +7,9 @@ from typing_extensions import deprecated
 
 class BashScripts:
     """various bash commands."""
+
     @staticmethod
-    def tail(filename: str, no_of_lines: int=10, offset: int=0) -> List[str]:
+    def tail(filename: str, no_of_lines: int = 10, offset: int = 0) -> List[str]:
         """Output the last part of a file
 
         Args:
@@ -21,17 +22,16 @@ class BashScripts:
         """
         lines = []
         proc = subprocess.Popen(
-            ['tail', '-n', str(no_of_lines + offset), filename],
-            stdout=subprocess.PIPE)
+            ["tail", "-n", str(no_of_lines + offset), filename], stdout=subprocess.PIPE
+        )
         for line in io.TextIOWrapper(proc.stdout, encoding="utf-8"):
             lines.append(line)
         del lines[:offset]
         return lines
 
-
     @staticmethod
     @deprecated("Use controlPanelClass instead to set volume.")
-    def set_mastervolume(volume_in_percent: int) ->None:
+    def set_mastervolume(volume_in_percent: int) -> None:
         """
         @deprecated
         Set master volume on system.
@@ -43,7 +43,6 @@ class BashScripts:
         command = ["amixer", "sset", "Master", f"{volume_in_percent}%"]
         with subprocess.Popen(command) as _:
             pass
-
 
     @staticmethod
     def clamp(val: int, minval: int, maxval: int) -> int:

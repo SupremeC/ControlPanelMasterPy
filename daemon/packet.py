@@ -7,12 +7,14 @@ import logging
 from dataclasses import dataclass
 from enum import IntEnum  # , verify, UNIQUE
 
-logger = logging.getLogger('daemon.PacketSerial.Packet')
+logger = logging.getLogger("daemon.PacketSerial.Packet")
+
 
 # @verify(UNIQUE)
-class HWEvent  (IntEnum):
+class HWEvent(IntEnum):
     """HWEvent"""
-    UNDEFINED = 0,
+
+    UNDEFINED = (0,)
     LED = 1
     I2CALED = 2
     I2CBLED = 3
@@ -30,8 +32,9 @@ class HWEvent  (IntEnum):
 
 
 # @verify(UNIQUE)
-class ErrorType (IntEnum):
+class ErrorType(IntEnum):
     """Packet Error enum"""
+
     NONE_ = 0
     UNKNOWNEVENT = 1
     LEDINVALIDVALUE = 2
@@ -44,14 +47,16 @@ class ErrorType (IntEnum):
 
 
 # @verify(UNIQUE)
-class BlinkTarget (IntEnum):
+class BlinkTarget(IntEnum):
     """Special Target. Affects multiple LEDs"""
+
     AUDIO_PRESETBTNS = 200
     SPEAKER_LEDS = 201
 
 
-class PwmBoard (IntEnum):
+class PwmBoard(IntEnum):
     """PwmBoard"""
+
     NONE_ = 0
     I2CALED = HWEvent.I2CALED
     I2CBLED = HWEvent.I2CBLED
@@ -76,6 +81,7 @@ class Packet:
             *2nd: target
             *3rd: value
     """
+
     created: datetime
     hw_event: HWEvent = HWEvent.UNDEFINED
     target: int = 0
@@ -94,15 +100,13 @@ class Packet:
             self.target = args[1]
             self.val = args[2]
 
-
     def parse_bytes(self, byte_arr: bytes) -> None:
-        """ Parse bytes into packet values"""
+        """Parse bytes into packet values"""
         try:
             self.hw_event = HWEvent(byte_arr[0])
             self.target = byte_arr[1]
             self.error = ErrorType(byte_arr[2])
-            self.val = int.from_bytes(byte_arr[-2:],
-                                      byteorder='little', signed=False)
+            self.val = int.from_bytes(byte_arr[-2:], byteorder="little", signed=False)
         except IndexError as e:
             logger.error(e)
             self.error = ErrorType.FAILEDTOPARSEPACKET
@@ -110,28 +114,24 @@ class Packet:
             self.target = 0
             self.val = 0
 
-
     def as_bytes(self) -> bytes:
         """return Packet converted to bytes"""
         ba = bytearray()
-        ba.extend(int(self.hw_event).to_bytes(
-            length=1, byteorder='little', signed=False))
-        ba.extend(self.target.to_bytes(
-            length=1, byteorder='little', signed=False))
-        ba.extend(int(self.error).to_bytes(
-            length=1, byteorder='little', signed=False))
-        ba.extend(self.val.to_bytes(
-            length=2, byteorder='little', signed=False))
+        ba.extend(
+            int(self.hw_event).to_bytes(length=1, byteorder="little", signed=False)
+        )
+        ba.extend(self.target.to_bytes(length=1, byteorder="little", signed=False))
+        ba.extend(int(self.error).to_bytes(length=1, byteorder="little", signed=False))
+        ba.extend(self.val.to_bytes(length=2, byteorder="little", signed=False))
         return bytes(ba)
-
 
     def as_human_friendly_str(self) -> str:
         """Packet as a human-friendly readable string"""
         r = self.created.strftime("%H:%M:%S") + "   "
-        r += self.hw_event.name.ljust(9, ' ') +"_"
+        r += self.hw_event.name.ljust(9, " ") + "_"
         r += f"t={str(self.target).ljust(3, ' ')}_v={self.val}"
-        if(self.error is not None and self.error != ErrorType.NONE_):
-            r += f'  error={self.error.name}'
+        if self.error is not None and self.error != ErrorType.NONE_:
+            r += f"  error={self.error.name}"
         return r
 
     @staticmethod
@@ -142,8 +142,8 @@ class Packet:
             "target-attr": obj.target,
             "val-attr": obj.val,
             "created-attr": obj.created.isoformat(),
-            "error-attr":obj.error,
-            "hw_event-attr":obj.hw_event
+            "error-attr": obj.error,
+            "hw_event-attr": obj.hw_event,
         }
 
     @staticmethod

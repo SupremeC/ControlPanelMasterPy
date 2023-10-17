@@ -13,11 +13,12 @@ from Pyro5.api import Daemon, register_class_to_dict, register_dict_to_class
 from daemon.packet import Packet
 
 
-logger = logging.getLogger('daemon.ctrlPanel')
+logger = logging.getLogger("daemon.ctrlPanel")
 
 
 class PyroDaemon(threading.Thread):
     """runs Pyro in its own thread"""
+
     pyro_daemon: Daemon = None
     uri: str = None
     owner = None
@@ -49,7 +50,7 @@ class PyroDaemon(threading.Thread):
         so that other apps can read it"""
         file = PyroDaemon.get_path_urifile()
         logger.debug("writing uri to: %s", file.absolute())
-        with file.open("w",-1,"utf-8") as filehandle:
+        with file.open("w", -1, "utf-8") as filehandle:
             filehandle.write(str(self.uri))
         logger.info("PyroDaemon started on URI: %s", self.uri)
         logger.info("URI written to: %s", file.absolute())

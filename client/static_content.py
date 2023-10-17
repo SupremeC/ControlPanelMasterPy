@@ -7,22 +7,27 @@ sys.path.append("..")
 
 class StaticContent:
     """helper methods"""
+
     @staticmethod
     def header():
         """header"""
         header_widgets = []
-        for w in ["[F1]Overview", "[F2]FakeIncomingPacket", "[F3] SendCommand", "[F4]Logs"]:
+        for w in [
+            "[F1]Overview",
+            "[F2]FakeIncomingPacket",
+            "[F3] SendCommand",
+            "[F4]Logs",
+        ]:
             header_widgets.append(u.AttrMap(u.Text(w), "topheader"))
         return u.Columns(header_widgets)
-
 
     @staticmethod
     def footer():
         """footer"""
         return u.AttrMap(u.Text(" Q to exit"), "footer")
 
-
     staticmethod
+
     def remove_overlays(loopref) -> None:
         """
         Remove ALL urwid.Overlay objects which are currently covering the base
@@ -34,7 +39,6 @@ class StaticContent:
             except:
                 break
 
-
     @staticmethod
     def cute_button(label, callback=None, data=None):
         """
@@ -42,10 +46,8 @@ class StaticContent:
         This function returns buttons that are a bit easier to love.
         """
         button = u.Button("", callback, data)
-        super(u.Button, button).__init__(
-            u.SelectableIcon(label))
+        super(u.Button, button).__init__(u.SelectableIcon(label))
         return button
-
 
     @staticmethod
     def packet_to_urwid(packet: daemon.packet.Packet):
@@ -62,7 +64,6 @@ class StaticContent:
             w.append(u.AttrMap(u.Text(e), "style_TODO"))
         return w
 
-
     @staticmethod
     def dialog_yesno(classref, loopref, title, message, callback_yes, callback_no):
         """
@@ -72,26 +73,26 @@ class StaticContent:
         buttons = [
             u.Text(("bold", message)),
             u.Divider(),
-            StaticContent.cute_button(("10" , ">> Yes"), lambda _: [
-                StaticContent.remove_overlays(loopref),
-                classref.update()
-            ]),
-            StaticContent.cute_button(("30", "<< No"),  lambda _: [
-                StaticContent.remove_overlays(loopref),
-                classref.update()
-            ]),
+            StaticContent.cute_button(
+                ("10", ">> Yes"),
+                lambda _: [StaticContent.remove_overlays(loopref), classref.update()],
+            ),
+            StaticContent.cute_button(
+                ("30", "<< No"),
+                lambda _: [StaticContent.remove_overlays(loopref), classref.update()],
+            ),
         ]
-        popup = OptionsMenu(
-            u.ListBox(u.SimpleFocusListWalker(buttons)),
-            title)
+        popup = OptionsMenu(u.ListBox(u.SimpleFocusListWalker(buttons)), title)
         popup.loopref = loopref
 
         loopref.widget = u.Overlay(
-            popup, loopref.widget,
+            popup,
+            loopref.widget,
             align=("relative", 50),
             valign=("relative", 50),
-            width=30, height=10)
-
+            width=30,
+            height=10,
+        )
 
     @staticmethod
     def dialog_ok(classref, loopref, title, message=None, messagewidgets=None):
@@ -105,25 +106,30 @@ class StaticContent:
         elif isinstance(messagewidgets, list):
             buttons += messagewidgets
         buttons.append(u.Divider())
-        buttons.append(StaticContent.cute_button(("10" , ">> OK"), lambda _: [
-                StaticContent.remove_overlays(loopref),
-                classref.update()
-            ]))
-        popup = OptionsMenu(
-            u.ListBox(u.SimpleFocusListWalker(buttons)),
-            title)
+        buttons.append(
+            StaticContent.cute_button(
+                ("10", ">> OK"),
+                lambda _: [StaticContent.remove_overlays(loopref), classref.update()],
+            )
+        )
+        popup = OptionsMenu(u.ListBox(u.SimpleFocusListWalker(buttons)), title)
         popup.loopref = loopref
 
         loopref.widget = u.Overlay(
-            popup, loopref.widget,
+            popup,
+            loopref.widget,
             align=("relative", 50),
             valign=("relative", 50),
-            width=40, height=9)
+            width=40,
+            height=9,
+        )
 
 
 class OptionsMenu(u.LineBox):
     """Extends base class to handle keypress for Overlay dialogs"""
+
     loopref = None
+
     def keypress(self, size, key):
         """handle keypress events"""
         keyl = key.lower()

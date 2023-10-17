@@ -13,7 +13,7 @@ from .ctrls_class import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OF
 from .packet import HWEvent, Packet  # noqa
 from .packet_serial import PacketSerial
 
-logger = logging.getLogger('daemon.ctrlPanel')
+logger = logging.getLogger("daemon.ctrlPanel")
 # The buffer of Arduino is increased to 256 bytes (if it works)
 # it was changed in platformio config file in VSCode
 # 256 / 7bytes => 36 packets until buffer is full
@@ -23,7 +23,9 @@ SEND_HELLO_INTERVALL = 30  # seconds
 
 class ControlPanel:
     """Master class (besides controlPanelDaemon of course)"""
+
     pyrodaemon: PyroDaemon
+
     def __init__(self):
         self._last_sent_hello: datetime.datetime = None
         self._last_received_hello: datetime.datetime = None
@@ -31,7 +33,8 @@ class ControlPanel:
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(
-            self._packet_receivedqueue, self._packet_sendqueue)
+            self._packet_receivedqueue, self._packet_sendqueue
+        )
         self._audioCtrl: AudioCtrl = AudioCtrl()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
 
@@ -43,7 +46,7 @@ class ControlPanel:
             logger.info("StartingPyro daemon...")
             self.pyrodaemon = PyroDaemon(self)
             self.pyrodaemon.daemon = True
-            self.pyrodaemon.start()  #do not use 'Run()'
+            self.pyrodaemon.start()  # do not use 'Run()'
             logger.debug("waiting for Pyro...")
             self.pyrodaemon.started.wait()
             self.pyrodaemon.write_uri_file()
@@ -102,10 +105,10 @@ class ControlPanel:
         except Exception as error:
             logger.error(error)
 
-    def _switch_status_changed(self, packet: Packet, no_action: bool=False) -> Packet:
-        '''Handles button logic'''
+    def _switch_status_changed(self, packet: Packet, no_action: bool = False) -> Packet:
+        """Handles button logic"""
         try:
-            p_tosend =  []
+            p_tosend = []
             mastersw = self._ctrls.get_ctrl_by_name("masterSw")
             inputsw = self._ctrls.get_ctrl_by_name("InputsSw")
             soundsw = self._ctrls.get_ctrl_by_name("SoundSw")
@@ -119,7 +122,9 @@ class ControlPanel:
             if packet.target == inputsw.pin:  # Inputs on / off
                 inputsw.set_state(bool(packet.val))
             if packet.target == 14:  # Backlight
-                p_tosend.extend(self._ctrls.get_ctrl_by_name("BacklightSw").set_state(packet.val))
+                p_tosend.extend(
+                    self._ctrls.get_ctrl_by_name("BacklightSw").set_state(packet.val)
+                )
                 relayctrl = self._ctrls.get_ctrl_by_name("BacklightRelay")
                 p_tosend.extend(relayctrl.set_state(bool(packet.val)))
             if packet.target == soundsw.pin:  # Sound on / off
@@ -131,17 +136,17 @@ class ControlPanel:
 
             if packet.target >= 2 and packet.target <= 11:
                 self.playSound(packet)
-            if packet.target >=17 and packet.target <= 26:  #pin 20,21 is excluded
+            if packet.target >= 17 and packet.target <= 26:  # pin 20,21 is excluded
                 self.apply_sound_effect(packet)
             if packet.target == 27:
                 self._record_audio(packet)
-            if packet.target >=28 and packet.target <= 31:
+            if packet.target >= 28 and packet.target <= 31:
                 self._set_relays(packet)
-            if packet.target >=32 and packet.target <= 37:
+            if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
-            if packet.target >=38 and packet.target <= 41: # uttag, vägglampa
-                self._set_relays(packet, safetyctrl = True)
-            if packet.target >=52 and packet.target <= 59: # lestrip_analog
+            if packet.target >= 38 and packet.target <= 41:  # uttag, vägglampa
+                self._set_relays(packet, safetyctrl=True)
+            if packet.target >= 52 and packet.target <= 59:  # lestrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
             if packet.target == 60:
@@ -153,7 +158,7 @@ class ControlPanel:
             if not no_action:
                 self.send_packets(p_tosend)
 
-    def master_volume(self, packet: Packet = None, new_vol: int=None) -> None:
+    def master_volume(self, packet: Packet = None, new_vol: int = None) -> None:
         """Clamps volumelevel to 0-100, and sets system master volume"""
         vol = None
         if packet is not None and packet.val is not None:
@@ -167,14 +172,14 @@ class ControlPanel:
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
             if safetyctrl:
-                flipsw = self._ctrls.get_ctrl(packet.target) 
+                flipsw = self._ctrls.get_ctrl(packet.target)
                 flipsw.set_state(bool(packet.val))
                 self.send_packets(flipsw.set_state_of_leds(bool(packet.val), True))
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
-                btn.set_state(not btn.state) #invert since btn is momentary
-                self.send_packets(btn.set_state(bool(packet.val))) #set RELAY state
-                
+                btn.set_state(not btn.state)  # invert since btn is momentary
+                self.send_packets(btn.set_state(bool(packet.val)))  # set RELAY state
+
         except Full:
             logger.exception("Sendqueue was full. Packet(s) could not be sent")
         except CtrlNotFoundException:
@@ -189,8 +194,10 @@ class ControlPanel:
     def ledstrip_control(self, packet: Packet):
         """TODO"""
 
-    def send_packets(self, packets: List, block: bool = False, timeout: float = None) -> None:
-        """ Puts the packet into sendQueue. It will be picked up ASAP by packetSerial thread"""
+    def send_packets(
+        self, packets: List, block: bool = False, timeout: float = None
+    ) -> None:
+        """Puts the packet into sendQueue. It will be picked up ASAP by packetSerial thread"""
         try:
             for p in packets:
                 self._packet_sendqueue.put(p, block, timeout)
@@ -198,10 +205,12 @@ class ControlPanel:
             logger.error("SendQueue was full. Packet(s) could not be sent")
 
     def time_to_send_hello(self) -> bool:
-        """ Is it time to send hello yet?"""
-        return (self._last_sent_hello is None or
-                (datetime.datetime.now() - self._last_sent_hello)
-                    .total_seconds() > SEND_HELLO_INTERVALL)
+        """Is it time to send hello yet?"""
+        return (
+            self._last_sent_hello is None
+            or (datetime.datetime.now() - self._last_sent_hello).total_seconds()
+            > SEND_HELLO_INTERVALL
+        )
 
     def reset(self):
         """
@@ -215,7 +224,9 @@ class ControlPanel:
             self._ctrls.reset()
             self.clear_packet_queue()
             # send RequestStatus packet to get actual ctrls status
-            self._packet_sendqueue.put(Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1)
+            self._packet_sendqueue.put(
+                Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1
+            )
         except (Full, TimeoutError) as err:
             logger.error(err)
         else:
@@ -223,7 +234,7 @@ class ControlPanel:
 
     def set_panelstatus(self, state: bool):
         """Set MainMaster on/off
-        
+
         if OFF: Send Packet to turn all LEDs off
         """
         self._mainMasterOn.state = state
@@ -243,10 +254,9 @@ class ControlPanel:
         else:
             logger.debug("SendQueue is empty. Good")
 
-
-#==============================================
-#========== PURO EXPOSED METHODS ==============
-#==============================================
+    # ==============================================
+    # ========== PURO EXPOSED METHODS ==============
+    # ==============================================
 
     @expose
     def say_hello(self) -> str:
@@ -259,19 +269,46 @@ class ControlPanel:
         status = {}
         status.update({"Read Queue": self._packet_receivedqueue.qsize()})
         status.update({"Send Queue": self._packet_sendqueue.qsize()})
-        status.update({"Last Sent Hello":
-                       ("-" if self._last_sent_hello is None
-                        else self._last_sent_hello.isoformat())})
-        status.update({"Last Incoming Hello":
-                       ("-" if self._last_received_hello is None
-                        else self._last_received_hello.isoformat())})
+        status.update(
+            {
+                "Last Sent Hello": (
+                    "-"
+                    if self._last_sent_hello is None
+                    else self._last_sent_hello.isoformat()
+                )
+            }
+        )
+        status.update(
+            {
+                "Last Incoming Hello": (
+                    "-"
+                    if self._last_received_hello is None
+                    else self._last_received_hello.isoformat()
+                )
+            }
+        )
         status.update({"Volume": "TODO"})
-        status.update({"Main Switch": self._bool_to_onoffstr(
-            self._ctrls.get_ctrl_by_name("masterSw").state)})
-        status.update({"Inputs Switch": self._bool_to_onoffstr(
-            self._ctrls.get_ctrl_by_name("InputsSw").state)})
-        status.update({"Sound Switch": self._bool_to_onoffstr(
-            self._ctrls.get_ctrl_by_name("SoundSw").state)})
+        status.update(
+            {
+                "Main Switch": self._bool_to_onoffstr(
+                    self._ctrls.get_ctrl_by_name("masterSw").state
+                )
+            }
+        )
+        status.update(
+            {
+                "Inputs Switch": self._bool_to_onoffstr(
+                    self._ctrls.get_ctrl_by_name("InputsSw").state
+                )
+            }
+        )
+        status.update(
+            {
+                "Sound Switch": self._bool_to_onoffstr(
+                    self._ctrls.get_ctrl_by_name("SoundSw").state
+                )
+            }
+        )
         return status
 
     @expose

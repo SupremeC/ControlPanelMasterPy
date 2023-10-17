@@ -13,21 +13,23 @@ from daemon.packet import HWEvent, Packet
 from daemon.sliding_window import SlidingWindow
 
 
-logger = logging.getLogger('daemon.PacketSerial')
+logger = logging.getLogger("daemon.PacketSerial")
 consoleHandler = logging.StreamHandler()
 logFormatter = logging.Formatter(
-    "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
+    "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
+)
 consoleHandler.setFormatter(logFormatter)
 logger.addHandler(consoleHandler)
 
 
 class PacketSerial:
-    """Wraps serialOverUSB connection to add support for 
+    """Wraps serialOverUSB connection to add support for
     async reading and writing of Packets.
 
     Returns:
         PacketSerial: instance
     """
+
     @property
     def port(self) -> str:
         """Read the current port name
@@ -45,8 +47,9 @@ class PacketSerial:
             bool: Is the damn port open or not
         """
         return False if self._ser is None else self._ser.is_open
+
     BAUDRATE = 115200
-    PACKET_DEVIDER = b'\x00'
+    PACKET_DEVIDER = b"\x00"
     STORE_X_PACKETS_IN_HISTORY = 10
 
     def __init__(self, rqueue: Queue, squeue: Queue):
@@ -62,8 +65,7 @@ class PacketSerial:
         self.last_received: list[Packet] = []
         self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
 
-
-    def set_rate_limit(self, nr_of_packets:int, ptime_unit: float):
+    def set_rate_limit(self, nr_of_packets: int, ptime_unit: float):
         """Sliding Window implementation. Limits the no of packets
         that can be sent during a sliding time frame.
 
@@ -74,19 +76,21 @@ class PacketSerial:
         self.throttle.limit_per_timeunit = nr_of_packets
         self.throttle.time_unit = ptime_unit
 
-
     def find_port_to_arduino(self) -> str:
         """Get the name of the port that is connected to Arduino."""
         port = "ErrorPS.01: Arduino not found"
         ports = serial.tools.list_ports.comports()
         for p in ports:
             logger.info(
-                "Found: Port:%s\tName:%s\tmf:%s\tHWID:%s", p.device,
-                p.name, p.manufacturer, p.hwid)
+                "Found: Port:%s\tName:%s\tmf:%s\tHWID:%s",
+                p.device,
+                p.name,
+                p.manufacturer,
+                p.hwid,
+            )
             if p.manufacturer is not None and "Arduino" in p.manufacturer:
                 port = p.device
         return port
-
 
     def open_connection(self) -> None:
         """Tries to open port to establish serialOverUSB connection.
@@ -98,20 +102,22 @@ class PacketSerial:
         try:
             logger.info("PacketSerial Opening port %s", self.port)
             self._ser = serial.Serial(port=self._port, baudrate=self.BAUDRATE)
-            logger.info("Serial port is " +
-                        "open" if self._ser.is_open else "closed")
+            logger.info("Serial port is " + "open" if self._ser.is_open else "closed")
             if self._readserial_thread is None:
-                self._readserial_thread = threading.Thread(target=self._start_read_packets)
+                self._readserial_thread = threading.Thread(
+                    target=self._start_read_packets
+                )
             if not self._readserial_thread.is_alive():
                 self._readserial_thread.start()
             if self._writeserial_thread is None:
-                self._writeserial_thread = threading.Thread(target=self._start_write_packets)
+                self._writeserial_thread = threading.Thread(
+                    target=self._start_write_packets
+                )
             if not self._writeserial_thread.is_alive():
                 self._writeserial_thread.start()
         except Exception as e:
             logger.error(e)
             # raise
-
 
     def close_connection(self) -> None:
         """Close serial connection.
@@ -126,9 +132,15 @@ class PacketSerial:
             logger.info("waiting for serial worker threads to stop...")
             self._rshutdown_flag.set()
             self._sshutdown_flag.set()
-            if self._readserial_thread is not None and self._readserial_thread.is_alive():
+            if (
+                self._readserial_thread is not None
+                and self._readserial_thread.is_alive()
+            ):
                 self._readserial_thread.join(30)
-            if self._writeserial_thread is not None and self._readserial_thread.is_alive():
+            if (
+                self._writeserial_thread is not None
+                and self._readserial_thread.is_alive()
+            ):
                 self._writeserial_thread.join(30)
 
             if self._readserial_thread.is_alive():
@@ -140,7 +152,6 @@ class PacketSerial:
             logger.info("Worker threads stopped. PacketSerial: port closed")
         except (TimeoutError, RuntimeError) as e:
             logger.error(e)
-
 
     def send_hello(self) -> None:
         """Sends a Hello packet to ArduinoMega. Hopefully
@@ -158,7 +169,6 @@ class PacketSerial:
                 logger.debug(a)
             logger.error("ah crap. QueueSize=%d", self._send_queue.qsize())
             logger.error(e)
-
 
     def _start_read_packets(self) -> None:
         """Monitors Serial connection for new data.
@@ -186,7 +196,6 @@ class PacketSerial:
                 logger.error(e)
         self._rshutdown_flag.clear()
 
-
     def _start_write_packets(self) -> None:
         """Monitors Send Queue for new data.
         Should be run in a dedicated thread.
@@ -198,7 +207,7 @@ class PacketSerial:
         while not self._sshutdown_flag.is_set():
             if self._send_queue.qsize() > 0:
                 if not self.throttle.ok_to_send():
-                    time.sleep(self.throttle.time_unit *.4)
+                    time.sleep(self.throttle.time_unit * 0.4)
                     continue
                 try:
                     packet = self._send_queue.get_nowait(block=False)
@@ -207,13 +216,16 @@ class PacketSerial:
                         self.__send_packet(packet)
                 except Empty:
                     pass
-                except (TypeError, serial.SerialTimeoutException, serial.SerialException) as e:
+                except (
+                    TypeError,
+                    serial.SerialTimeoutException,
+                    serial.SerialException,
+                ) as e:
                     logger.error("Failed to send packet. Error as follows...")
                     logger.error(e)
             else:
                 time.sleep(0.1)
         self._sshutdown_flag.clear()
-
 
     def __send_packet(self, packet: Packet) -> None:
         if self._ser is None:
@@ -224,9 +236,8 @@ class PacketSerial:
             return
         encoded_bytes = PacketSerial.encode_packet(packet)
         self._ser.write(encoded_bytes)
-        self._ser.write(self.PACKET_DEVIDER) # packet divider
+        self._ser.write(self.PACKET_DEVIDER)  # packet divider
         self._log_packet(packet, False)
-
 
     def _log_packet(self, packet: Packet, received: bool) -> None:
         """Logs Packet info to log file and stores it in
@@ -243,7 +254,6 @@ class PacketSerial:
             del alist[0]
         logger.info(msg, packet)
 
-
     @staticmethod
     def encode_packet(packet: Packet) -> bytes:
         """Encode a Packet as byte array.
@@ -259,7 +269,6 @@ class PacketSerial:
         # encoded_packet = bytearray(cobs.encode(packet.as_bytes()))
         # encoded_packet.extend(b'\x00')  # Add package sequence (divider)
         # return bytes(encoded_packet)
-
 
     @staticmethod
     def decode_packet(b: bytes) -> Packet:

@@ -27,12 +27,12 @@ class DaemonSC:
                 # exit first parent
                 sys.exit(0)
         except OSError as error:
-            sys.stderr.write(f'fork #1 failed: {error}\n')
+            sys.stderr.write(f"fork #1 failed: {error}\n")
             sys.exit(1)
         DaemonSC.print_process_info(pid)
 
         # decouple from parent environment
-        os.chdir('/')
+        os.chdir("/")
         os.setsid()
         os.umask(0)
 
@@ -43,21 +43,21 @@ class DaemonSC:
                 # exit from second parent
                 sys.exit(0)
         except OSError as error:
-            sys.stderr.write(f'fork #2 failed: {error}\n')
+            sys.stderr.write(f"fork #2 failed: {error}\n")
             sys.exit(1)
         DaemonSC.print_process_info(pid)
-        #atexit.register(self.delpid)
+        # atexit.register(self.delpid)
 
         # write pidfile
         try:
-            f = open(self.pidfile, 'w+', encoding="utf-8")
-            f.write(str(os.getpid()) + '\n')
+            f = open(self.pidfile, "w+", encoding="utf-8")
+            f.write(str(os.getpid()) + "\n")
             f.flush()
             f.close()
             if not os.path.isfile(self.pidfile):
-                sys.stderr.write('pidfile missing. \n')
+                sys.stderr.write("pidfile missing. \n")
         except Exception as error:
-            sys.stderr.write(f'write pidfile failed: {error}\n')
+            sys.stderr.write(f"write pidfile failed: {error}\n")
             raise
 
         # try:
@@ -71,9 +71,9 @@ class DaemonSC:
         # redirect standard file descriptors
         sys.stdout.flush()
         sys.stderr.flush()
-        si = open(os.devnull, 'r')
-        so = open(os.devnull, 'a+')
-        se = open(os.devnull, 'a+')
+        si = open(os.devnull, "r")
+        so = open(os.devnull, "a+")
+        se = open(os.devnull, "a+")
 
         os.dup2(si.fileno(), sys.stdin.fileno())
         os.dup2(so.fileno(), sys.stdout.fileno())
@@ -82,13 +82,13 @@ class DaemonSC:
     @staticmethod
     def print_process_info(p_pid: int):
         """pid greater than 0 represents the parent process"""
-        if p_pid > 0 :
+        if p_pid > 0:
             print("I am parent process:")
             print("Process ID:", os.getpid())
             print("Child's process ID:", p_pid)
 
         # pid equal to 0 represents the created child process
-        else :
+        else:
             print("\nI am child process:")
             print("Process ID:", os.getpid())
             print("Parent's process ID:", os.getppid())
@@ -103,14 +103,13 @@ class DaemonSC:
         try:
             message = "trying to read pidfile {0}\n"
             sys.stdout.write(message.format(self.pidfile))
-            with open(self.pidfile, 'r', encoding="utf-8") as pf:
+            with open(self.pidfile, "r", encoding="utf-8") as pf:
                 pid = int(pf.read().strip())
         except IOError:
             pid = None
 
         if pid:
-            message = "pidfile {0} already exist. " + \
-                    "Daemon already running?\n"
+            message = "pidfile {0} already exist. " + "Daemon already running?\n"
             sys.stderr.write(message.format(self.pidfile))
             sys.exit(1)
         else:
@@ -126,11 +125,11 @@ class DaemonSC:
         pid = 0
         try:
             if os.path.isfile(self.pidfile):
-                pf = open(self.pidfile, 'r', encoding="utf-8")
+                pf = open(self.pidfile, "r", encoding="utf-8")
                 pid = int(pf.read().strip())
                 pf.close()
         except Exception as error:
-            sys.stderr.write(f'stop() reading pidfile failed: {error}\n')
+            sys.stderr.write(f"stop() reading pidfile failed: {error}\n")
         # try:
         #     with open(self.pidfile, 'r') as pf:
         #         pid = int(pf.read().strip())
@@ -139,10 +138,9 @@ class DaemonSC:
         #     sys.stderr.write('stop() reading pidfile failed: {0}\n'.format(err))
 
         if not pid:
-            message = "pidfile {0} does not exist. " + \
-                    "Daemon not running?\n"
+            message = "pidfile {0} does not exist. " + "Daemon not running?\n"
             sys.stderr.write(message.format(self.pidfile))
-            #if os.path.exists(self.pidfile):
+            # if os.path.exists(self.pidfile):
             #    os.remove(self.pidfile)
             return  # not an error in a restart
 

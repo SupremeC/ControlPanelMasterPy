@@ -9,6 +9,7 @@ class SelectableText(u.Text):
     dummy class. Only purpose is to make the listbox content scrollable
     The 'magic' is setting '_selectable = True'
     """
+
     _selectable = True
 
     def keypress(self, _, key):
@@ -16,9 +17,9 @@ class SelectableText(u.Text):
         return key
 
 
-
 class LogView:
     """View"""
+
     loopref: u.MainLoop
     walker: u.SimpleListWalker
     listbox: u.ListBox
@@ -27,30 +28,25 @@ class LogView:
         self.title = "LogView"
         self.cp_daemon = cp_daemon
 
-
     def set_loopref(self, ref) -> None:
         """loop reference"""
         self.loopref = ref
-
 
     def del_loopref(self) -> None:
         """Delete loop reference. Because memory cleanup"""
         self.loopref = None
 
-
     def update(self):
         """Do shit here to update values in View"""
-        #now = datetime.now()
-        #self.obj_text.set_text(self.file_content + str(now.second))
+        # now = datetime.now()
+        # self.obj_text.set_text(self.file_content + str(now.second))
         # self.obj_text.set_text(self.get_text_from_logfile())
-
 
     def get_text_from_logfile(self, nr_of_lines) -> str:
         "Read logfile and return the last lines (tail)"
         return BashScripts.tail(
-            "/home/david/source/cpPy/ControlPanelMasterPy/logs.log",
-            nr_of_lines, 0)
-
+            "/home/david/source/cpPy/ControlPanelMasterPy/logs.log", nr_of_lines, 0
+        )
 
     def build(self):
         """Build widgets in this View
@@ -66,12 +62,21 @@ class LogView:
         textlines = self.get_text_from_logfile(lines_to_read)
         for line in textlines:
             self.walker.append(
-                u.AttrMap(SelectableText(line.strip(), wrap="clip"), "listbox", "reveal focus"))
+                u.AttrMap(
+                    SelectableText(line.strip(), wrap="clip"), "listbox", "reveal focus"
+                )
+            )
         self.listbox.set_focus(self.walker.positions(True)[0])
 
         # ===============
         listbox = u.Columns([listbox])
         # toprow = u.BoxAdapter(toprow, 10)
         # listbox = u.Filler(listbox)
-        return u.AttrMap(u.Frame(
-            body=listbox, header=StaticContent.header(), footer=StaticContent.footer()), 'bg')
+        return u.AttrMap(
+            u.Frame(
+                body=listbox,
+                header=StaticContent.header(),
+                footer=StaticContent.footer(),
+            ),
+            "bg",
+        )
