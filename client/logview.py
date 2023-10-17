@@ -2,6 +2,8 @@
 import urwid as u
 from client.static_content import StaticContent
 from client.bashscripts import BashScripts
+from pathlib import Path
+import daemon.global_variables
 
 
 class SelectableText(u.Text):
@@ -44,9 +46,9 @@ class LogView:
 
     def get_text_from_logfile(self, nr_of_lines) -> str:
         "Read logfile and return the last lines (tail)"
-        return BashScripts.tail(
-            "/home/david/source/cpPy/ControlPanelMasterPy/logs.log", nr_of_lines, 0
-        )
+        approot = Path(daemon.global_variables.root_path)
+        logfile = approot.joinpath("logs.log")
+        return BashScripts.tail(logfile, nr_of_lines, 0)
 
     def build(self):
         """Build widgets in this View

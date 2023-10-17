@@ -7,10 +7,21 @@ from daemon.pyro_daemon import PyroDaemon
 from daemon.packet import Packet
 
 
-PYRO_DAEMON_URI = PyroDaemon.get_uri_fromfile()
-cp_daemon = Proxy(PYRO_DAEMON_URI)
-register_dict_to_class("pyro-custom-Packet", Packet.packet_dict_to_class)
-register_class_to_dict(Packet, Packet.packet_class_to_dict)
+try:
+    PYRO_DAEMON_URI = PyroDaemon.get_uri_fromfile()
+    cp_daemon = Proxy(PYRO_DAEMON_URI)
+    register_dict_to_class("pyro-custom-Packet", Packet.packet_dict_to_class)
+    register_class_to_dict(Packet, Packet.packet_class_to_dict)
+except FileNotFoundError:
+    print(f"Could not read uri_file.")
+    answer = input("Continue anyway? [Y,N]")
+    if answer.capitalize() != "Y":
+        raise
+except Exception as e:
+    raise e
+finally
+    if cp_daemon
+
 
 views = {"overview": OverView(cp_daemon), "logview": LogView(cp_daemon)}
 
