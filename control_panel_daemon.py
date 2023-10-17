@@ -32,17 +32,18 @@ import sys
 import time
 import logging
 import os
-import daemon.setup_logger as setup_logger # noqa
+import daemon.setup_logger as setup_logger  # noqa
 from daemon.daemon_super_class import DaemonSC
 from daemon.controlpanel_class import ControlPanel
 
-logger = logging.getLogger('daemon')
+logger = logging.getLogger("daemon")
 
 
 class MyDaemon(DaemonSC):
-    """    def __init__(self, pidfile):
-            super().__init__(pidfile)
-            self._controlPanel = None"""
+    """def __init__(self, pidfile):
+    super().__init__(pidfile)
+    self._controlPanel = None"""
+
     _control_panel: ControlPanel
 
     def run(self):
@@ -52,7 +53,7 @@ class MyDaemon(DaemonSC):
         logger.debug("Daemon run.init complete")
         while not self.kill_now:
             self._control_panel.process()
-            time.sleep(.1)
+            time.sleep(0.1)
         logger.debug("exiting run() method")
         self._control_panel.stop()
 
@@ -63,15 +64,15 @@ class MyDaemon(DaemonSC):
 
 
 if __name__ == "__main__":
-    daemon = MyDaemon('/tmp/daemon-controlpanel.pid')
+    daemon = MyDaemon("/tmp/daemon-controlpanel.pid")
     if len(sys.argv) == 2:
-        if 'start' == sys.argv[1]:
+        if "start" == sys.argv[1]:
             print(f"Starting {sys.argv[0]} Daemon...")
             daemon.start()
-        elif 'stop' == sys.argv[1]:
+        elif "stop" == sys.argv[1]:
             daemon.stop()
             print("Daemon stopped!")
-        elif 'restart' == sys.argv[1]:
+        elif "restart" == sys.argv[1]:
             print("restarting daemon")
             daemon.restart()
         else:

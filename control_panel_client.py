@@ -12,48 +12,47 @@ cp_daemon = Proxy(PYRO_DAEMON_URI)
 register_dict_to_class("pyro-custom-Packet", Packet.packet_dict_to_class)
 register_class_to_dict(Packet, Packet.packet_class_to_dict)
 
-views = {
-    "overview": OverView(cp_daemon), 
-    "logview": LogView(cp_daemon)
-}
+views = {"overview": OverView(cp_daemon), "logview": LogView(cp_daemon)}
+
 
 class App:
     """GUI App"""
+
     current_view: str
 
     def __init__(self):
         self.palette = {
-            ("bg",               "light gray",  "black"),
-            ("normalText",          "light gray",       "black"),
-            ("topheader",        "", "", "", "#F5F5F5, bold", "#006400"),
-            ("footer",           "white, bold", "dark red"),
+            ("bg", "light gray", "black"),
+            ("normalText", "light gray", "black"),
+            ("topheader", "", "", "", "#F5F5F5, bold", "#006400"),
+            ("footer", "white, bold", "dark red"),
             ("listbox", "", "", "", "#F5FFFA", "black"),
-            #('reveal focus', 'yellow', 'dark cyan', 'standout'),
-            ('reveal focus', "", "", "", '#2F4F4F, bold', '#48D1CC'),
-            ("button", "light red", "default")
+            # ('reveal focus', 'yellow', 'dark cyan', 'standout'),
+            ("reveal focus", "", "", "", "#2F4F4F, bold", "#48D1CC"),
+            ("button", "light red", "default"),
         }
 
         # col_rows = u.raw_display.Screen().get_cols_rows()
         # h = col_rows[0] - 2
         self.current_view = "overview"
         frame = views[self.current_view].build()
-        self.loop = u.MainLoop(frame, self.palette, unhandled_input=self.unhandled_input)
+        self.loop = u.MainLoop(
+            frame, self.palette, unhandled_input=self.unhandled_input
+        )
         self.loop.screen.set_terminal_properties(colors=256)
         self.loop.set_alarm_in(2, self.refresh)
         views[self.current_view].set_loopref(self.loop)
 
-
     def unhandled_input(self, key):
         """Handle all events that no other widget wants to handle"""
-        if key in ('f1','1'):
+        if key in ("f1", "1"):
             self.set_view("overview")
-        if key in ('f2','2'):
+        if key in ("f2", "2"):
             self.set_view("logview")
-        if key in ('q','Q','esc'):
+        if key in ("q", "Q", "esc"):
             raise u.ExitMainLoop()
 
-
-    def set_view(self, view_name:str):
+    def set_view(self, view_name: str):
         """Set which View that is visible"""
 
         # I was afraid of memory leaks because the View held a reference to <loop>.
@@ -61,11 +60,10 @@ class App:
         # anymore and can be removed.
         views[self.current_view].del_loopref()
 
-        #set View
+        # set View
         self.current_view = view_name
         self.loop.widget = views[view_name].build()
         views[view_name].set_loopref(self.loop)
-
 
     def start(self):
         """Start GUI"""
@@ -87,6 +85,6 @@ class App:
         self.loop.start()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = App()
     app.start()
