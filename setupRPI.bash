@@ -9,11 +9,11 @@ git config --global user.name "David Berglund"
 # -> rename the public Key to"authorized_keys" and place it in home/pi/.ssh/
 # -> get the private key file to ClientComputer and place it in c:\users\david\.ssh\keys
 # -> Create a textfile called "config" with this text:
-# Host 192.168.150.43
-#              HostName 192.168.150.43
-#              User pi
+# Host 192.168.150.33
+#              HostName 192.168.150.33
+#              User david
 #              PreferredAuthentications publickey
-#              IdentityFile "/Users/david/.ssh/keys/AxelControlPanel_rsa"
+#              IdentityFile "/Users/david/.ssh/keys/id_ed25519"
 
 
 sudo apt-get install -y rubberband-cli

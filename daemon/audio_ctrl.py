@@ -23,6 +23,7 @@ class AudioCtrl:
     max_rectime_seconds: int
     rec_ctrl: AudioRec
     effect_ctrl: AudioEffect
+    master_volume: int = 20
 
     def __init__(self):
         self.effects_running: bool = False

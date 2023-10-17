@@ -6,8 +6,10 @@ import logging
 from queue import Empty, Full, Queue
 from typing import List
 from Pyro5.api import expose
+
+from daemon.audio_ctrl import AudioCtrl
 from .pyro_daemon import PyroDaemon
-from .ctrls_class import CtrlNotFoundException, HwCtrls
+from .ctrls_class import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
 from .packet import HWEvent, Packet  # noqa
 from .packet_serial import PacketSerial
 
@@ -30,6 +32,7 @@ class ControlPanel:
         self._packet_receivedqueue: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue)
+        self._audioCtrl: AudioCtrl = AudioCtrl()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
 
     def start(self):
@@ -111,9 +114,8 @@ class ControlPanel:
                 mastersw.state = bool(packet.val)
                 if not mastersw.state:
                     p_tosend.extend(self._ctrls.set_all_leds(False))
-            if not mastersw.state:
-                self.send_packets(p_tosend)
-                return
+                    self.send_packets(p_tosend)
+                    return
             if packet.target == inputsw.pin:  # Inputs on / off
                 inputsw.set_state(bool(packet.val))
             if packet.target == 14:  # Backlight
@@ -122,6 +124,7 @@ class ControlPanel:
                 p_tosend.extend(relayctrl.set_state(bool(packet.val)))
             if packet.target == soundsw.pin:  # Sound on / off
                 soundsw.state = bool(packet.val)
+                self.master_volume(new_vol=0)
             if not inputsw.state:
                 self.send_packets(p_tosend)
                 return
@@ -136,13 +139,13 @@ class ControlPanel:
                 self._set_relays(packet)
             if packet.target >=32 and packet.target <= 37:
                 self.ledstrip_control(packet)
-            if packet.target >=38 and packet.target <= 41:
+            if packet.target >=38 and packet.target <= 41: # uttag, vägglampa
                 self._set_relays(packet, safetyctrl = True)
-            if packet.target >=52 and packet.target <= 59:
+            if packet.target >=52 and packet.target <= 59: # lestrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
             if packet.target == 60:
-                self._setVolume(packet)
+                self.master_volume(packet=packet)
         except Exception:
             logger.error(packet)
             logger.exception("exception in function switch_status_changed()")
@@ -150,16 +153,28 @@ class ControlPanel:
             if not no_action:
                 self.send_packets(p_tosend)
 
+    def master_volume(self, packet: Packet = None, new_vol: int=None) -> None:
+        """Clamps volumelevel to 0-100, and sets system master volume"""
+        vol = None
+        if packet is not None and packet.val is not None:
+            vol = LEDCtrl.clamp(packet.val, 0, 100)
+        elif new_vol is not None:
+            vol = LEDCtrl.clamp(new_vol, 0, 100)
+        else:
+            return
+        self._audioCtrl.set_master_volume(vol)
+
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
             if safetyctrl:
-                # turn on slave ctrls (LEDs)
-                relayctrl = self._ctrls.get_ctrl(packet.target)
-                self.send_packets(relayctrl.set_state(bool(packet.val)))
+                flipsw = self._ctrls.get_ctrl(packet.target) 
+                flipsw.set_state(bool(packet.val))
+                self.send_packets(flipsw.set_state_of_leds(bool(packet.val), True))
             else:
-                # activate actual RELAY output
-                slavectrl = self._ctrls.get_slavectrl(packet.target)
-                self.send_packets(slavectrl.set_state(bool(packet.val)))
+                btn = self._ctrls.get_slavectrl(packet.target)
+                btn.set_state(not btn.state) #invert since btn is momentary
+                self.send_packets(btn.set_state(bool(packet.val))) #set RELAY state
+                
         except Full:
             logger.exception("Sendqueue was full. Packet(s) could not be sent")
         except CtrlNotFoundException:

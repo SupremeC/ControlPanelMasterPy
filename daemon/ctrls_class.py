@@ -15,6 +15,8 @@ NO_PIN: int = -1
 SWITCH_OFF: bool = False
 SWITCH_ON: bool = True
 PWM_MAX: int = 4094
+LED_ON: bool = True
+LED_OFF: bool = False
 
 
 @dataclass
@@ -316,12 +318,6 @@ class HwCtrls:
         self.ctrls.append(Analogctrl(pin=104, section="ledstripL", name="L Blue"))
 
     def _list_aux_controls(self):
-        # TODO:
-        # missing leds in documentation
-        # - Add them anyway with led_pin = NO_LED, until resolved
-        # FlipBtns LEDs can be controlled, but PinNr is missing
-        # - Add them anyway with led_pin = NO_LED, until resolved
-        # Not really sure how wall lamp will work
         aux_pwrelay = Hwctrl(pin=38, section="aux", name="powerRelayCornerFlip")
         aux_pwrelaybtn = Hwctrl(pin=28, section="aux", name="powerRelayCornerBtn")
         aux_pwrelaybtn.leds.append(
@@ -330,15 +326,15 @@ class HwCtrls:
 
         aux_pwrelaybed1 = Hwctrl(pin=39, section="aux", name="powerRelayBed1Flip")
         aux_pwrelaybed1.leds.append(
-            LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=NO_LED, led_on_val=PWM_MAX)) #TODO
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=10, led_on_val=PWM_MAX))
         aux_pwrelaybed1btn = Hwctrl(pin=29, section="aux", name="powerRelayBed1Btn")
         aux_pwrelaybed1btn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=10, led_on_val=PWM_MAX))
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=48, led_on_val=PWM_MAX))
         aux_pwrelaybed1.slaves.append(aux_pwrelaybed1btn)
 
         aux_pwrelaybed2 = Hwctrl(pin=40, section="aux", name="powerRelayBed2Flip")
         aux_pwrelaybed2.leds.append(
-            LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=NO_LED, led_on_val=PWM_MAX)) #TODO
+            LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=49, led_on_val=PWM_MAX))
         aux_pwrelaybed2btn = Hwctrl(pin=30, section="aux", name="powerRelayBed2Btn")
         aux_pwrelaybed2btn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=11, led_on_val=PWM_MAX))
