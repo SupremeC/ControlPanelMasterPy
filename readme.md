@@ -8,13 +8,14 @@
 <p align="center">
     <a href="https://github.com/SupremeC/ControlPanelMasterPy/commits/master">
     <img src="https://img.shields.io/github/last-commit/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
-         alt="GitHub last commit">
+         alt="GitHub last commit" /></a>
     <a href="https://github.com/SupremeC/ControlPanelMasterPy/issues">
     <img src="https://img.shields.io/github/issues-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
-         alt="GitHub issues">
+         alt="GitHub issues" /></a>
     <a href="https://github.com/SupremeC/ControlPanelMasterPy/pulls">
     <img src="https://img.shields.io/github/issues-pr-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
-         alt="GitHub pull requests">
+         alt="GitHub pull requests" /></a>
+    <img src="https://img.shields.io/badge/Language-Python-blue" alt="Python" />
 </p>
       
 <p align="center">
