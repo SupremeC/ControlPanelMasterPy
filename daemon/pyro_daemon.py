@@ -11,6 +11,7 @@ import pathlib
 import logging
 from Pyro5.api import Daemon, register_class_to_dict, register_dict_to_class
 from daemon.packet import Packet
+import daemon.global_variables
 
 
 logger = logging.getLogger("daemon.ctrlPanel")
@@ -58,7 +59,7 @@ class PyroDaemon(threading.Thread):
     @staticmethod
     def get_path_urifile() -> pathlib.Path:
         """Absolute path to file containing Pyro uri"""
-        source = pathlib.Path("/home/david/source/cpPy/ControlPanelMasterPy/")
+        source = pathlib.Path(daemon.global_variables.root_path)
         file = source.joinpath("pyro_uri.text").absolute()
         return file
 
