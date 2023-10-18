@@ -1,6 +1,5 @@
 <h1 align="center">
-  <br>
-  <a href="https://github.com/ArmynC/ArminC-AutoExec/archive/master.zip">PUT LOGO HERE</a>
+  <br />PUT LOGO HERE
 </h1>
 
 <h4 align="center">Custom-built Daemon and Client for retro-inspired ControlPanel</h4>
@@ -27,6 +26,27 @@
   <a href="#wiki">Wiki</a> •
   <a href="#license">License</a>
 </p>
+
+## Installation
+
+##### Downloading and installing steps:
+1. **[Download](https://github.com/SupremeC/ControlPanelMasterPy/archive/master.zip)** the latest version of ControlPanelMasterPy.
+2.  Open the _archive_ and **extract** the contents into a folder you choose.
+3.  Install all of the dependencies using `PIP3 install xyz`
+4. **Launch** the daemon `python3 controlPanelDaemon.py start`
+> [!IMPORTANT]  
+> Arduino needs to be connected via USB and powered up before starting the ControlPaneldaemon.
+
+> [!NOTE]  
+> Client allows you to monitor and interact with the Daemon. Its optional and not required to run.
+
+
+#### Daemon commands:
+`
+python3 controlPanelDaemon.py start
+python3 controlPanelDaemon.py stop
+python3 controlPanelDaemon.py restart
+`
 
 # ControlPanel - Raspberry
 ## - Daemon
