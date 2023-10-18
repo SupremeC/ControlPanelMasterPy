@@ -14,8 +14,8 @@
     <a href="https://github.com/SupremeC/ControlPanelMasterPy/pulls">
     <img src="https://img.shields.io/github/issues-pr-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
          alt="GitHub pull requests" /></a>
-    <img src="https://img.shields.io/badge/Language-Python-blue" alt="Python" />
-   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="GPLv3" />
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Language-Python-blue" alt="Python" /></a>
+   <a href="https://www.tldrlegal.com/license/gnu-general-public-license-v3-gpl-3"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="GPLv3" /></a>
 </p>
       
 <p align="center">
