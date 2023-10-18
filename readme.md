@@ -34,6 +34,7 @@ TODO - write text here...  Also link to other repo with final "showcase" product
 ## Features
 
 ## Overview
+![alt text](https://github.com/SupremeC/ControlPanelMasterPy/raw/master/.github/images/daemon_sketch.png "Logo Title Text 1")
 
 ## Installation
 
