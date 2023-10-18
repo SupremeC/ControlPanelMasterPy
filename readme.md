@@ -24,11 +24,6 @@
   <a href="#symbols">Symbols</a> •
   <a href="#binds">Binds</a> •
   <a href="#wiki">Wiki</a> •
-  <a href="#contributing">Contributing</a> •
-  <a href="#deprecated">Deprecated</a> •
-  <a href="#credits">Credits</a> •
-  <a href="#support">Support</a> •
-  <a href="#license">License</a>
 </p>
 
 # ControlPanel - Raspberry
@@ -68,3 +63,7 @@ ___
 
 ### TODO Electronics!
 ___
+
+## License
+
+[![License: CC0-1.0](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://tldrlegal.com/license/creative-commons-cc0-1.0-universal)
