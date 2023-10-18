@@ -4,3 +4,6 @@ daemon/__pycache__/controlPanel_class.cpython-39.pyc
 *.wav
 *.log
 pyro_uri.text
+.github/images/~$$daemon_sketch.~vsdx
+*.~vsdx
+*.vsdx

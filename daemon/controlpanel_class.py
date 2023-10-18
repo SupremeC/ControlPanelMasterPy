@@ -177,7 +177,7 @@ class ControlPanel:
                 self.send_packets(flipsw.set_state_of_leds(bool(packet.val), True))
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
-                btn.set_state(not btn.state)  # invert since btn is momentary
+                btn.set_state(not btn.state)  # invert, since btn is momentary
                 self.send_packets(btn.set_state(bool(packet.val)))  # set RELAY state
 
         except Full:
