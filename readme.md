@@ -24,6 +24,7 @@
   <a href="#symbols">Symbols</a> •
   <a href="#binds">Binds</a> •
   <a href="#wiki">Wiki</a> •
+  <a href="#license">License</a>
 </p>
 
 # ControlPanel - Raspberry
