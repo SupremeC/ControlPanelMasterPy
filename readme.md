@@ -18,13 +18,22 @@
 </p>
       
 <p align="center">
-  <a href="#installation">Installation</a> •
+  <a href="#description">Description</a> •
   <a href="#features">Features</a> •
   <a href="#overview">Overview</a> •
+  <a href="#installation">Installation</a> •
   <a href="#poi">POI</a> •
-  <a href="#related repos">Related Repos</a> •
+  <a href="#dependencies">Dependencies</a> •
+  <a href="#related-repos">Related Repos</a> •
   <a href="#license">License</a>
 </p>
+
+## Description
+TODO - write text here...  Also link to other repo with final "showcase" product.
+
+## Features
+
+## Overview
 
 ## Installation
 
@@ -46,23 +55,35 @@ foo@bar$ python3 controlPanelDaemon.py stop
 foo@bar$ python3 controlPanelDaemon.py restart
 ```
 
-## 
 
-# ControlPanel - Raspberry
-## - Daemon
-## - Client
+## POI
+If you want to fork this repo and customize it, pay special attention to these two code files
++ [ctrls.py](https://github.com/SupremeC/ControlPanelMasterPy/blob/master/daemon/ctrls.py)
++ [daemon/controlpanel_class.py](https://github.com/SupremeC/ControlPanelMasterPy/blob/5aa683eba5b9cbf9b319cd330a82109abc30e227/daemon/controlpanel_class.py#L108)
 
+## Dependencies
++ [urwid/urwid](https://github.com/urwid/urwid) (Client: console user interface)
++ [irmen/Pyro5](https://github.com/irmen/Pyro5) (comm between Client & Daemon)
++ [COBS](https://pypi.org/project/cobs/ "Consistent Overhead Byte Stuffing") (COBS encoding and decoding)
++ [numpy](https://numpy.org/) (manipulate & store audio data)
++ [spotify/pedalboard](https://github.com/spotify/pedalboard) (audio effects)
++ [pydub](https://github.com/jiaaro/pydub) (audio effects)
++ [pyrubberband](https://github.com/bmcfee/pyrubberband) (audio effects)
++ [soundfile](https://github.com/bastibe/python-soundfile/) (audio effects)
 
+## Related Repos
++ [SupremeC/ControlPanelAxel](https://github.com/SupremeC/ControlPanelAxel) showcase final product
++ [SupremeC/ControlPanelMega](https://github.com/SupremeC/ControlPanelMega) Arduino code [c++]
+
+---
 
 ### TODO Global!
-___
 - Move one ledstrip to ceiling lamp?  (esp32 over Wifi)
 - Bedlamp - How to wire up?
 - How to restore (btn)state when either Mega or Mastery reboots?
 
 
 ### TODO MasterPY!
-___
 - Cache and play Sound
 - Stop playback of clip when new Clip plays
   - Stop Playback of clip when recording
@@ -76,7 +97,6 @@ ___
 
 
 ### TODO MEGA!
-___
 - ButtonClass jled  and jled-pca9685-hal
 - analog btn handler & conversion
 - analog "+100" ID support
@@ -84,7 +104,6 @@ ___
 
 
 ### TODO Electronics!
-___
 
 ## License
 
