@@ -15,6 +15,7 @@
     <img src="https://img.shields.io/github/issues-pr-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
          alt="GitHub pull requests" /></a>
     <img src="https://img.shields.io/badge/Language-Python-blue" alt="Python" />
+   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="GPLv3" />
 </p>
       
 <p align="center">
@@ -108,4 +109,4 @@ If you want to fork this repo and customize it, pay special attention to these t
 
 ## License
 
-[![License: CC0-1.0](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://tldrlegal.com/license/creative-commons-cc0-1.0-universal)
+![License: GPL-3.0 license](https://img.shields.io/badge/License-GPLv3-blue.svg)
