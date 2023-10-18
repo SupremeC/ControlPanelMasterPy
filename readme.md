@@ -1,3 +1,53 @@
+<h1 align="center">
+  <br />PUT LOGO HERE
+</h1>
+
+<h4 align="center">Custom-built Daemon and Client for retro-inspired ControlPanel</h4>
+
+<p align="center">
+    <a href="https://github.com/SupremeC/ControlPanelMasterPy/commits/master">
+    <img src="https://img.shields.io/github/last-commit/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
+         alt="GitHub last commit" /></a>
+    <a href="https://github.com/SupremeC/ControlPanelMasterPy/issues">
+    <img src="https://img.shields.io/github/issues-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
+         alt="GitHub issues" /></a>
+    <a href="https://github.com/SupremeC/ControlPanelMasterPy/pulls">
+    <img src="https://img.shields.io/github/issues-pr-raw/SupremeC/ControlPanelMasterPy.svg?style=flat-square&logo=github&logoColor=white"
+         alt="GitHub pull requests" /></a>
+    <img src="https://img.shields.io/badge/Language-Python-blue" alt="Python" />
+</p>
+      
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#features">Features</a> •
+  <a href="#overview">Overview</a> •
+  <a href="#poi">POI</a> •
+  <a href="#related repos">Related Repos</a> •
+  <a href="#license">License</a>
+</p>
+
+## Installation
+
+##### Downloading and installing steps:
+1. **[Download](https://github.com/SupremeC/ControlPanelMasterPy/archive/master.zip)** the latest version of ControlPanelMasterPy.
+2.  Open the _archive_ and **extract** the contents into a folder you choose.
+3.  Install all of the dependencies using `PIP3 install xyz`
+4. **Launch** the daemon `python3 controlPanelDaemon.py start`
+> [!IMPORTANT]  
+> Arduino needs to be connected via USB and powered up before starting the ControlPaneldaemon.
+
+> [!NOTE]  
+> Client allows you to monitor and interact with the Daemon. Its optional and not required to run.
+
+#### Daemon commands:
+```console
+foo@bar$ python3 controlPanelDaemon.py start
+foo@bar$ python3 controlPanelDaemon.py stop
+foo@bar$ python3 controlPanelDaemon.py restart
+```
+
+## 
+
 # ControlPanel - Raspberry
 ## - Daemon
 ## - Client
@@ -35,3 +85,7 @@ ___
 
 ### TODO Electronics!
 ___
+
+## License
+
+[![License: CC0-1.0](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://tldrlegal.com/license/creative-commons-cc0-1.0-universal)
