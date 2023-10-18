@@ -19,11 +19,10 @@
       
 <p align="center">
   <a href="#installation">Installation</a> •
-  <a href="#updating">Updating</a> •
   <a href="#features">Features</a> •
-  <a href="#symbols">Symbols</a> •
-  <a href="#binds">Binds</a> •
-  <a href="#wiki">Wiki</a> •
+  <a href="#overview">Overview</a> •
+  <a href="#poi">POI</a> •
+  <a href="#related repos">Related Repos</a> •
   <a href="#license">License</a>
 </p>
 
@@ -40,13 +39,14 @@
 > [!NOTE]  
 > Client allows you to monitor and interact with the Daemon. Its optional and not required to run.
 
-
 #### Daemon commands:
 ```console
 foo@bar$ python3 controlPanelDaemon.py start
 foo@bar$ python3 controlPanelDaemon.py stop
 foo@bar$ python3 controlPanelDaemon.py restart
 ```
+
+## 
 
 # ControlPanel - Raspberry
 ## - Daemon
