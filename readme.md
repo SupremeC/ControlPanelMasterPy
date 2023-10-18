@@ -42,11 +42,11 @@
 
 
 #### Daemon commands:
-`
+```console
 python3 controlPanelDaemon.py start
 python3 controlPanelDaemon.py stop
 python3 controlPanelDaemon.py restart
-`
+```
 
 # ControlPanel - Raspberry
 ## - Daemon
