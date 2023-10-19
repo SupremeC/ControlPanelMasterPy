@@ -5,12 +5,12 @@
 from datetime import datetime
 import logging
 from dataclasses import dataclass
-from enum import IntEnum  # , verify, UNIQUE
+from enum import unique, IntEnum
 
 logger = logging.getLogger("daemon.PacketSerial.Packet")
 
 
-# @verify(UNIQUE)
+@unique
 class HWEvent(IntEnum):
     """HWEvent"""
 
@@ -31,7 +31,7 @@ class HWEvent(IntEnum):
     """ A package with this Event is sent when Mega starts up. """
 
 
-# @verify(UNIQUE)
+@unique
 class ErrorType(IntEnum):
     """Packet Error enum"""
 
@@ -46,7 +46,7 @@ class ErrorType(IntEnum):
     OTHER_ = 254
 
 
-# @verify(UNIQUE)
+@unique
 class BlinkTarget(IntEnum):
     """Special Target. Affects multiple LEDs"""
 
@@ -54,6 +54,7 @@ class BlinkTarget(IntEnum):
     SPEAKER_LEDS = 201
 
 
+@unique
 class PwmBoard(IntEnum):
     """PwmBoard"""
 

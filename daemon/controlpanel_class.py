@@ -7,7 +7,7 @@ from queue import Empty, Full, Queue
 from typing import List
 from Pyro5.api import expose
 
-from daemon.audio_ctrl import AudioCtrl
+from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
 from .pyro_daemon import PyroDaemon
 from .ctrls_class import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
 from .packet import HWEvent, Packet  # noqa
@@ -134,12 +134,18 @@ class ControlPanel:
                 self.send_packets(p_tosend)
                 return
 
-            if packet.target >= 2 and packet.target <= 11:
-                self.playSound(packet)
+            if packet.target >= 2 and packet.target <= 11 and packet.val == 1:
+                self._audioCtrl.recsaved_play(packet.target)
+            if packet.target >= 2 and packet.target <= 11 and packet.val == 100:
+                self._audioCtrl.restore_original_audio(packet.target)
             if packet.target >= 17 and packet.target <= 26:  # pin 20,21 is excluded
-                self.apply_sound_effect(packet)
-            if packet.target == 27:
-                self._record_audio(packet)
+                self._audioCtrl.apply_effect(packet, self)
+            if packet.target == 27 and packet.val:
+                self._audioCtrl.sysaudio_play(aevent.REC_STARTED)
+                self._audioCtrl.start_recording()
+            if packet.target == 27 and packet.val == 0:
+                self._audioCtrl.sysaudio_play(aevent.REC_STOPPED)
+                self._audioCtrl.stop_recording()
             if packet.target >= 28 and packet.target <= 31:
                 self._set_relays(packet)
             if packet.target >= 32 and packet.target <= 37:
