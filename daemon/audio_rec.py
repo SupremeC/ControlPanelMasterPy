@@ -66,7 +66,7 @@ class AudioRec:
         self._create_stream(device=self.device_id)
         self.recording = True
         self.recordingstart = time.time()
-        filename = tempfile.mktemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
+        filename = tempfile.mkstemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
         if self.audio_q.qsize() != 0:
             logger.warning("WARNING: req.Queue not empty!")
         self.thread = threading.Thread(
