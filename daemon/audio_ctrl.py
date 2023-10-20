@@ -53,7 +53,7 @@ class AudioCtrl:
     """
 
     systemsounds: dict = None
-    effects_running: bool
+    effects_running: bool = False
     current_filepath: str
     max_rectime_seconds: int = 30
     rec_ctrl: AudioRec
@@ -185,8 +185,9 @@ class AudioCtrl:
         self, infile, effect, callback: Callable[[str], None] = None
     ) -> None:
         self.effects_running = True
-        outfile = str(self.__build_tmp_filename(suffix="effect.tmp"))
-        self.current_filepath = self.effect_ctrl.do_effect(infile, effect, outfile)
+        outfile = self.__build_tmp_filename(suffix="effect.tmp.wav")
+        outfile = str(self.__tempdir.joinpath(outfile).resolve())
+        self.current_filepath = self.effect_ctrl.do_effect(str(infile), effect, outfile)
         self.__effect_on_done()
         if callback is not None:
             callback(self.current_filepath)

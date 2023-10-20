@@ -72,6 +72,8 @@ class AudioEffect:
                 f"EffectType not supported. Type == {effect}"
             )
 
+    # TODO - function has same name as pedalboard function 'time_stretch'
+    # rename!
     def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
         """TODO: Pedalboard have implemented timestrech but cannot make it work
         #  - Time_stretch is a function instead of class (expected)
@@ -92,13 +94,21 @@ class AudioEffect:
 
     def reverb(self, infile: str, outfile: str) -> str:
         """Reverb effect"""
-        board = Pedalboard([Chorus(), Reverb(room_size=0.25)])
+        board = Pedalboard(
+            [
+                Chorus(),
+                Reverb(room_size=0.25),
+                Gain(gain_db=10),
+            ]
+        )
         self._apply_board(board, infile, outfile)
         return outfile
 
     def phaser(self, infile: str, outfile: str) -> str:
         """Phaser effect"""
-        board = Pedalboard([Phaser(feedback=0, depth=0.8, rate_hz=1.2, mix=0.7)])
+        board = Pedalboard(
+            [Phaser(feedback=0, depth=0.8, rate_hz=1.2, mix=0.7), Gain(gain_db=10)]
+        )
         self._apply_board(board, infile, outfile)
         return outfile
 
