@@ -8,9 +8,12 @@ Blocking the file-writing thread for some time is no problem, as long as the
 recording can be stopped successfully when it is supposed to.
 
 """
+import datetime
 import os
+from pathlib import Path
 import queue
-import tempfile
+import random
+import string
 import threading
 import logging
 import time
@@ -31,11 +34,11 @@ class AudioRec:
     previously_recording: bool
     thread: threading.Thread
     rec_filename: str
-    __dir: str
+    __dir: Path
     device_id: int
     max_rec_time: int
 
-    def __init__(self, folder: str):
+    def __init__(self, folder: Path):
         """Init AudioRec
 
         Args:
@@ -66,7 +69,9 @@ class AudioRec:
         self._create_stream(device=self.device_id)
         self.recording = True
         self.recordingstart = time.time()
-        filename = tempfile.mkstemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
+        filename = self.__build_tmp_filename(uprefix="tmp_rec", suffix=".wav")
+        filename = self.__dir.joinpath(filename)
+        # filename = tempfile.mktemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
         if self.audio_q.qsize() != 0:
             logger.warning("WARNING: req.Queue not empty!")
         self.thread = threading.Thread(
@@ -185,6 +190,16 @@ class AudioRec:
         """blocking"""
         if self.thread is not None and self.thread.is_alive():
             self.thread.join()
+
+    @staticmethod
+    def __build_tmp_filename(uprefix: str = None, suffix: str = ".wav") -> str:
+        if uprefix is not None:
+            prefix = uprefix
+        else:
+            prefix = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
+        rndstr = "".join(random.choice(string.ascii_lowercase) for i in range(8))
+        filename = "_".join([prefix, rndstr, suffix])
+        return filename
 
     def __del__(self):
         self.stop()
