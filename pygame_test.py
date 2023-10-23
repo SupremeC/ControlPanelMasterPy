@@ -1,5 +1,6 @@
 """AudioCtrl"""
 import os
+import sys
 import time
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent
 from daemon.audio_effects import EffectType
@@ -12,7 +13,11 @@ class AudioCtrlTestMenu:
 
     def rootmenu(self):
         print(
-            f"1. Start recording\n2. Stop recording\n3. Choose effect...\n4. Assign audio to Btn\n5. Play SysAudio"
+            "1. Start recording\n"
+            "2. Stop recording\n"
+            "3. Choose effect...\n"
+            "4. Assign audio to Btn\n"
+            "5. Play SysAudio"
         )
         answer = input("Choose action.'Q' to exit")
         if answer == "1":
@@ -26,7 +31,7 @@ class AudioCtrlTestMenu:
         elif answer == "5":
             self.currentmenu = self.sysAudioMenu
         else:
-            exit()
+            sys.exit()
 
     def __init__(self):
         self.currentmenu = self.rootmenu
@@ -58,8 +63,7 @@ class AudioCtrlTestMenu:
         elif answer in ["r", "R"]:
             self.currentmenu = self.rootmenu
         elif answer in ["q", "Q"]:
-            exit()
-        pass
+            sys.exit()
 
     def sysAudioMenu(self):
         for e in SysAudioEvent:
@@ -71,7 +75,7 @@ class AudioCtrlTestMenu:
         if answer == "S":
             self.app.stop_all_audio()
         elif answer in ["q", "Q"]:
-            exit()
+            sys.exit()
 
 
 if __name__ == "__main__":

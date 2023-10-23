@@ -3,6 +3,7 @@
 import datetime
 import logging
 import random
+import shutil
 import string
 import threading
 from pathlib import Path
@@ -26,6 +27,7 @@ class SysAudioEvent(IntEnum):
     BTN_CLICKED = 3
     REC_STARTED = 30
     REC_STOPPED = 32
+    REC_COULD_NOT_REC = 34
     EFFECT_APPLYING = 40
     EFFECT_APPLY_DONE = 42
     VOLUME_CHANGE = 50
@@ -39,6 +41,7 @@ class SysAudioEvent(IntEnum):
     AUDIO_OFF = 67
     RELAY_ON = 70
     RELAY_OFF = 71
+    FAILED = 200
     TICK = 254
 
 
@@ -95,9 +98,25 @@ class AudioCtrl:
         if pin is None:
             logger.warning("No pinNr provided to AudioCtrl.recsaved_play(). NOOP")
             return
-        sound = mixer.Sound(self.__storagedir.joinpath(f"{pin}.wav"))
+        soundpath = self.__storagedir.joinpath(f"{pin}.wav")
+        if not soundpath.exists():
+            self.sysaudio_play(SysAudioEvent.FAILED)
+            return
+        sound = mixer.Sound()
         sound.set_volume(self.__master_volume)
         mixer.find_channel(force=True).play(sound, loops=0)
+
+    def restore_original_audio(self, pin: int) -> None:
+        """Copies the original wav-file to __storagedir
+        folder, overwriting any existing file."""
+        if pin is None:
+            return
+        try:
+            src = self.__systemsoundsdir.joinpath(f"{pin}.wav")
+            dest = self.__storagedir.joinpath(f"{pin}.wav")
+            shutil.copy(src, dest)
+        except OSError as e:
+            logger.exception(e)
 
     def sysaudio_play(self, event: SysAudioEvent = SysAudioEvent.NONE_) -> None:
         """PLays built-in sound. See folder 'systemsounds'"""
@@ -129,10 +148,13 @@ class AudioCtrl:
         """
         self.current_filepath = None
         AudioCtrl.__remove_files_in_dir(self.__tempdir)
-        return self.rec_ctrl.rec()
+        if not self.rec_ctrl.rec():
+            self.sysaudio_play(SysAudioEvent.REC_COULD_NOT_REC)
+            return False
+        return True
 
     def is_recording(self) -> bool:
-        """Are we currently recording"""
+        """Are we currently recording?"""
         return self.rec_ctrl.recording
 
     def stop_recording(self) -> None:
@@ -193,7 +215,11 @@ class AudioCtrl:
             callback(self.current_filepath)
 
     def __effect_on_done(self) -> None:
+        # self.sysaudio_play(SysAudioEvent.EFFECT_APPLY_DONE)
+        sound = mixer.Sound(self.current_filepath)
         self.effects_running = False
+        sound.set_volume(self.__master_volume)
+        mixer.find_channel(force=True).play(sound, loops=0)
 
     def __build_tmp_filename(self, suffix) -> str:
         prefix = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
@@ -237,7 +263,10 @@ class AudioCtrl:
 
     @staticmethod
     def __remove_files_in_dir(folder: Path) -> None:
-        [f.unlink(missing_ok=True) for f in folder.glob("*") if f.is_file()]
+        try:
+            [f.unlink(missing_ok=True) for f in folder.glob("*") if f.is_file()]
+        except OSError as e:
+            logger.exception(e)
 
 
 class AudioFilePathEmptyException(Exception):

@@ -129,7 +129,7 @@ class ControlPanel:
                 p_tosend.extend(relayctrl.set_state(bool(packet.val)))
             if packet.target == soundsw.pin:  # Sound on / off
                 soundsw.state = bool(packet.val)
-                self.master_volume(new_vol=0)
+                self.audio_volume(new_vol=0)
             if not inputsw.state:
                 self.send_packets(p_tosend)
                 return
@@ -156,7 +156,7 @@ class ControlPanel:
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
             if packet.target == 60:
-                self.master_volume(packet=packet)
+                self.audio_volume(packet=packet)
         except Exception:
             logger.error(packet)
             logger.exception("exception in function switch_status_changed()")
@@ -164,8 +164,8 @@ class ControlPanel:
             if not no_action:
                 self.send_packets(p_tosend)
 
-    def master_volume(self, packet: Packet = None, new_vol: int = None) -> None:
-        """Clamps volumelevel to 0-100, and sets system master volume"""
+    def audio_volume(self, packet: Packet = None, new_vol: int = None) -> None:
+        """Clamps volume to 0-100, and sets master volume"""
         vol = None
         if packet is not None and packet.val is not None:
             vol = LEDCtrl.clamp(packet.val, 0, 100)
@@ -173,7 +173,7 @@ class ControlPanel:
             vol = LEDCtrl.clamp(new_vol, 0, 100)
         else:
             return
-        self._audioCtrl.set_master_volume(vol)
+        self._audioCtrl.set_volume(vol)
 
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:
