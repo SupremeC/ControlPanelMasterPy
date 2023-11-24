@@ -7,7 +7,11 @@ from queue import Empty, Full, Queue
 from typing import List
 from Pyro5.api import expose
 
-from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
+from daemon.audio_ctrl import (
+    AudioCtrl,
+    SysAudioEvent as aevent,
+    SysAudioEvent as aevent,
+)
 from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
 from .packet import HWEvent, Packet  # noqa
@@ -148,7 +152,7 @@ class ControlPanel:
             if packet.target == 27 and packet.val == 0:
                 self._audioCtrl.sysaudio_play(aevent.REC_STOPPED)
                 self._audioCtrl.stop_recording()
-            if packet.target >= 28 and packet.target <= 31:
+            if packet.target >= 66 and packet.target <= 69:
                 self._set_relays(packet)
             if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
