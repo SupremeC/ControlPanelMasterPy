@@ -75,6 +75,8 @@ if __name__ == "__main__":
         elif "restart" == sys.argv[1]:
             print("restarting daemon")
             daemon.restart()
+        elif "bash" == sys.argv[1]:
+            daemon.run()
         else:
             print("Unknown command")
             sys.exit(2)

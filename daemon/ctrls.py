@@ -370,7 +370,7 @@ class HwCtrls:
 
     def _list_aux_controls(self):
         aux_pwrelay = Hwctrl(pin=38, section="aux", name="powerRelayCornerFlip")
-        aux_pwrelaybtn = Hwctrl(pin=28, section="aux", name="powerRelayCornerBtn")
+        aux_pwrelaybtn = Hwctrl(pin=66, section="aux", name="powerRelayCornerBtn")
         aux_pwrelaybtn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=9, led_on_val=PWM_MAX)
         )
@@ -380,7 +380,7 @@ class HwCtrls:
         aux_pwrelaybed1.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=10, led_on_val=PWM_MAX)
         )
-        aux_pwrelaybed1btn = Hwctrl(pin=29, section="aux", name="powerRelayBed1Btn")
+        aux_pwrelaybed1btn = Hwctrl(pin=67, section="aux", name="powerRelayBed1Btn")
         aux_pwrelaybed1btn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=48, led_on_val=PWM_MAX)
         )
@@ -390,14 +390,14 @@ class HwCtrls:
         aux_pwrelaybed2.leds.append(
             LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=49, led_on_val=PWM_MAX)
         )
-        aux_pwrelaybed2btn = Hwctrl(pin=30, section="aux", name="powerRelayBed2Btn")
+        aux_pwrelaybed2btn = Hwctrl(pin=68, section="aux", name="powerRelayBed2Btn")
         aux_pwrelaybed2btn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=11, led_on_val=PWM_MAX)
         )
         aux_pwrelaybed2.slaves.append(aux_pwrelaybed2btn)
 
         aux_lamp = Hwctrl(pin=41, section="aux", name="bedLampFlip")
-        aux_lampbtn = Hwctrl(pin=31, section="aux", name="bedLampBtn")
+        aux_lampbtn = Hwctrl(pin=69, section="aux", name="bedLampBtn")
         aux_lampbtn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=12, led_on_val=PWM_MAX)
         )
@@ -462,19 +462,22 @@ class HwCtrls:
         self.ctrls.append(Hwctrl(pin=12, name="masterSw", section="master"))
 
         ma_backl = Hwctrl(pin=14, name="BacklightSw", section="master")
+        ma_backl.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=63, led_on_val=1, led_follow_state=False))
         ma_backl.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=13, led_on_val=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=15, led_on_val=PWM_MAX)
         )
         ma_backl.slaves.append(Hwctrl(pin=43, name="BacklightRelay", section="master"))
 
         ma_inputsw = Hwctrl(pin=15, name="InputsSw", section="master")
+        ma_inputsw.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=64, led_on_val=1, led_follow_state=False))
         ma_inputsw.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=14, led_on_val=PWM_MAX)
         )
 
         ma_soundsw = Hwctrl(pin=16, name="SoundSw", section="master")
+        ma_soundsw.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, led_pin=65, led_on_val=1, led_follow_state=False))
         ma_soundsw.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=15, led_on_val=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, led_pin=13, led_on_val=PWM_MAX)
         )
         self.ctrls.extend([ma_backl, ma_inputsw, ma_soundsw])
 
