@@ -146,7 +146,7 @@ class ControlPanel:
             if packet.target == 27 and packet.val == 0:
                 self._audioCtrl.sysaudio_play(aevent.REC_STOPPED)
                 self._audioCtrl.stop_recording()
-            if packet.target >= 28 and packet.target <= 31:
+            if packet.target >= 66 and packet.target <= 69:
                 self._set_relays(packet)
             if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
