@@ -1,0 +1,6 @@
+--2023-11-14 19:34:39--  https://studio.youtube.com/youtubei/v1/creator_music/get_tracks?alt=json
+Slår upp studio.youtube.com (studio.youtube.com)... 142.250.74.78, 172.217.21.174, 216.58.207.206, ...
+Ansluter till studio.youtube.com (studio.youtube.com)|142.250.74.78|:443... ansluten.
+HTTP-begäran skickad, väntar på svar... 405 Method Not Allowed
+2023-11-14 19:34:39 FEL 405: Method Not Allowed.
+

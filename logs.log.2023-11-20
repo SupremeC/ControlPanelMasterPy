@@ -1,0 +1,12 @@
+2023-11-20 20:50:38,642	INFO	       run()	Hello from run(). Process ID:5456
+2023-11-20 20:50:38,673	INFO	find_port_to_arduino()	Found: Port:/dev/ttyACM0	Name:ttyACM0	mf:Arduino (www.arduino.cc)	HWID:USB VID:PID=2341:0042 SER=95038303531351F0C2C1 LOCATION=1-1.3:1.0
+2023-11-20 20:50:38,676	INFO	find_port_to_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial
+2023-11-20 20:52:36,590	INFO	       run()	Hello from run(). Process ID:5504
+2023-11-20 20:52:36,622	INFO	find_port_to_arduino()	Found: Port:/dev/ttyACM0	Name:ttyACM0	mf:Arduino (www.arduino.cc)	HWID:USB VID:PID=2341:0042 SER=95038303531351F0C2C1 LOCATION=1-1.3:1.0
+2023-11-20 20:52:36,625	INFO	find_port_to_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial
+2023-11-20 20:56:47,807	INFO	       run()	Hello from run(). Process ID:5544
+2023-11-20 20:56:47,837	INFO	find_port_to_arduino()	Found: Port:/dev/ttyACM0	Name:ttyACM0	mf:Arduino (www.arduino.cc)	HWID:USB VID:PID=2341:0042 SER=95038303531351F0C2C1 LOCATION=1-1.3:1.0
+2023-11-20 20:56:47,840	INFO	find_port_to_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial
+2023-11-20 21:01:10,056	INFO	       run()	Hello from run(). Process ID:6410
+2023-11-20 21:01:10,088	INFO	find_port_to_arduino()	Found: Port:/dev/ttyACM0	Name:ttyACM0	mf:Arduino (www.arduino.cc)	HWID:USB VID:PID=2341:0042 SER=95038303531351F0C2C1 LOCATION=1-1.3:1.0
+2023-11-20 21:01:10,091	INFO	find_port_to_arduino()	Found: Port:/dev/ttyAMA0	Name:ttyAMA0	mf:None	HWID:fe201000.serial

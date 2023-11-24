@@ -9,7 +9,7 @@ from Pyro5.api import expose
 
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
 from .pyro_daemon import PyroDaemon
-from .ctrls_class import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
+from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
 from .packet import HWEvent, Packet  # noqa
 from .packet_serial import PacketSerial
 
@@ -120,7 +120,7 @@ class ControlPanel:
                     self.send_packets(p_tosend)
                     return
             if packet.target == inputsw.pin:  # Inputs on / off
-                inputsw.set_state(bool(packet.val))
+                p_tosend.extend(inputsw.set_state(bool(packet.val)))
             if packet.target == 14:  # Backlight
                 p_tosend.extend(
                     self._ctrls.get_ctrl_by_name("BacklightSw").set_state(packet.val)
@@ -128,10 +128,12 @@ class ControlPanel:
                 relayctrl = self._ctrls.get_ctrl_by_name("BacklightRelay")
                 p_tosend.extend(relayctrl.set_state(bool(packet.val)))
             if packet.target == soundsw.pin:  # Sound on / off
-                soundsw.state = bool(packet.val)
+                p_tosend.extend(soundsw.set_state(bool(packet.val)))
                 self.audio_volume(new_vol=0)
+
+            self.send_packets(p_tosend)
+            p_tosend.clear()
             if not inputsw.state:
-                self.send_packets(p_tosend)
                 return
 
             if packet.target >= 2 and packet.target <= 11 and packet.val == 1:

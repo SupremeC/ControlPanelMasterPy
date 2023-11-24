@@ -189,11 +189,14 @@ class PacketSerial:
                     # last byte (packet devider byte)
                     rbytes = self._ser.read_until(self.PACKET_DEVIDER)[:-1]
                     p = PacketSerial.decode_packet(rbytes)
-                    self._received_queue.put_nowait(p)
-                    self._log_packet(p, True)
+                    if p.hw_event != HWEvent.LOOPDURATION and p.hw_event != HWEvent.NOOP:
+                        self._received_queue.put_nowait(p)
+                        self._log_packet(p, True)
                 time.sleep(0.05)
             except (TimeoutError, Full, cobs.DecodeError) as e:
                 logger.error(e)
+            except cobs.DecodeError as ex:
+                logger.error("invalid packet")
         self._rshutdown_flag.clear()
 
     def _start_write_packets(self) -> None:
@@ -210,7 +213,7 @@ class PacketSerial:
                     time.sleep(self.throttle.time_unit * 0.4)
                     continue
                 try:
-                    packet = self._send_queue.get_nowait(block=False)
+                    packet = self._send_queue.get_nowait()
                     self._send_queue.task_done()
                     if packet is not None:
                         self.__send_packet(packet)
@@ -250,7 +253,7 @@ class PacketSerial:
         alist = self.last_received if received else self.last_sent
         msg = "packet received: %s" if received else "packet sent: %s"
         alist.append(packet)
-        while alist.count() > self.STORE_X_PACKETS_IN_HISTORY:
+        while len(alist) > self.STORE_X_PACKETS_IN_HISTORY:
             del alist[0]
         logger.info(msg, packet)
 

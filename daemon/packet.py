@@ -29,6 +29,9 @@ class HWEvent(IntEnum):
     """ When sent: Ask Mega to do Reboot """
     BOOTMEGA = 11
     """ A package with this Event is sent when Mega starts up. """
+    LOOPDURATION = 12
+    RELAY = 13
+    NOOP = 14
 
 
 @unique
