@@ -7,13 +7,9 @@ from queue import Empty, Full, Queue
 from typing import List
 from Pyro5.api import expose
 
-from daemon.audio_ctrl import (
-    AudioCtrl,
-    SysAudioEvent as aevent,
-    SysAudioEvent as aevent,
-)
+from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
 from .pyro_daemon import PyroDaemon
-from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl, LED_ON, LED_OFF
+from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet  # noqa
 from .packet_serial import PacketSerial
 
@@ -21,7 +17,7 @@ logger = logging.getLogger("daemon.ctrlPanel")
 # The buffer of Arduino is increased to 256 bytes (if it works)
 # it was changed in platformio config file in VSCode
 # 256 / 7bytes => 36 packets until buffer is full
-MAX_PACKETS_IN_SEND_QUEUE = 36
+MAX_PACKETS_IN_SEND_QUEUE = 70
 SEND_HELLO_INTERVALL = 30  # seconds
 
 
@@ -39,7 +35,7 @@ class ControlPanel:
         self._pserial: PacketSerial = PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue
         )
-        self._audioCtrl: AudioCtrl = AudioCtrl()
+        self._audioctrl: AudioCtrl = AudioCtrl()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
 
     def start(self):
@@ -126,11 +122,7 @@ class ControlPanel:
             if packet.target == inputsw.pin:  # Inputs on / off
                 p_tosend.extend(inputsw.set_state(bool(packet.val)))
             if packet.target == 14:  # Backlight
-                p_tosend.extend(
-                    self._ctrls.get_ctrl_by_name("BacklightSw").set_state(packet.val)
-                )
-                relayctrl = self._ctrls.get_ctrl_by_name("BacklightRelay")
-                p_tosend.extend(relayctrl.set_state(bool(packet.val)))
+                self.cp_lights(packet)
             if packet.target == soundsw.pin:  # Sound on / off
                 p_tosend.extend(soundsw.set_state(bool(packet.val)))
                 self.audio_volume(new_vol=0)
@@ -141,22 +133,27 @@ class ControlPanel:
                 return
 
             if packet.target >= 2 and packet.target <= 11 and packet.val == 1:
-                self._audioCtrl.recsaved_play(packet.target)
+                self._audioctrl.recsaved_play(packet.target)
             if packet.target >= 2 and packet.target <= 11 and packet.val == 100:
-                self._audioCtrl.restore_original_audio(packet.target)
+                self._audioctrl.restore_original_audio(packet.target)
             if packet.target >= 17 and packet.target <= 26:  # pin 20,21 is excluded
-                self._audioCtrl.apply_effect(packet, self)
+                self._audioctrl.apply_effect(packet, self)
             if packet.target == 27 and packet.val:
-                self._audioCtrl.sysaudio_play(aevent.REC_STARTED)
-                self._audioCtrl.start_recording()
+                self._audioctrl.sysaudio_play(aevent.REC_STARTED)
+                self._audioctrl.start_recording()
             if packet.target == 27 and packet.val == 0:
-                self._audioCtrl.sysaudio_play(aevent.REC_STOPPED)
-                self._audioCtrl.stop_recording()
+                self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
+                self._audioctrl.stop_recording()
             if packet.target >= 66 and packet.target <= 69:
-                self._set_relays(packet)
+                ctrl = self._ctrls.get_slavectrl(packet.target)
+                if ctrl.parent.state:
+                    new_state = not ctrl.state
+                    self.send_packets(ctrl.set_state(new_state))
+                    self.send_packets(ctrl.slaves[0].set_state(new_state))
+                # self._set_relays(ctrl)
             if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
-            if packet.target >= 38 and packet.target <= 41:  # uttag, vägglampa
+            if packet.target >= 38 and packet.target <= 41:
                 self._set_relays(packet, safetyctrl=True)
             if packet.target >= 52 and packet.target <= 59:  # lestrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
@@ -170,6 +167,24 @@ class ControlPanel:
             if not no_action:
                 self.send_packets(p_tosend)
 
+    def cp_lights(self, packet: Packet) -> None:
+        """background light ON/OFF and ctrl LEDs"""
+        if packet.target == 14:
+            ctrl = self._ctrls.get_ctrl_by_name("BacklightSw")
+            relay = self._ctrls.get_ctrl_by_name("BacklightRelay")
+            relay.set_state(bool(packet.val))
+            send = []
+            send = ctrl.set_state(packet.val)
+            send.append(Packet(HWEvent.RELAY, relay.pin, 1))
+            if ctrl.quick_state_change:
+                logger.info(
+                    "All non-indicator LEDs ON"
+                    if relay.state
+                    else "All non-indicator LEDs OFF"
+                )
+                send.extend(self._ctrls.set_all_nonindicatorleds(relay.state))
+            self.send_packets(send)
+
     def audio_volume(self, packet: Packet = None, new_vol: int = None) -> None:
         """Clamps volume to 0-100, and sets master volume"""
         vol = None
@@ -179,7 +194,7 @@ class ControlPanel:
             vol = LEDCtrl.clamp(new_vol, 0, 100)
         else:
             return
-        self._audioCtrl.set_volume(vol)
+        self._audioctrl.set_volume(vol)
 
     def _set_relays(self, packet: Packet, safetyctrl: bool = False):
         try:

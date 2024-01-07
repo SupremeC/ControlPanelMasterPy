@@ -63,7 +63,7 @@ class PacketSerial:
         self._writeserial_thread = None
         self.last_sent: list[Packet] = []
         self.last_received: list[Packet] = []
-        self.throttle: SlidingWindow = SlidingWindow(35, 0.05)
+        self.throttle: SlidingWindow = SlidingWindow(55, 0.05)
 
     def set_rate_limit(self, nr_of_packets: int, ptime_unit: float):
         """Sliding Window implementation. Limits the no of packets
@@ -189,7 +189,10 @@ class PacketSerial:
                     # last byte (packet devider byte)
                     rbytes = self._ser.read_until(self.PACKET_DEVIDER)[:-1]
                     p = PacketSerial.decode_packet(rbytes)
-                    if p.hw_event != HWEvent.LOOPDURATION and p.hw_event != HWEvent.NOOP:
+                    if (
+                        p.hw_event != HWEvent.LOOPDURATION
+                        and p.hw_event != HWEvent.NOOP
+                    ):
                         self._received_queue.put_nowait(p)
                         self._log_packet(p, True)
                 time.sleep(0.05)
@@ -284,5 +287,6 @@ class PacketSerial:
         Returns:
             Packet: The decoded Packet
         """
-        p = Packet(cobs.decode(b[:-1]))
+        # p = Packet(cobs.decode(b[:-1]))
+        p = Packet(cobs.decode(b))
         return p
