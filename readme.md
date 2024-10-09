@@ -80,8 +80,6 @@ If you want to fork this repo and customize it, pay special attention to these t
 ---
 
 ### TODO Global!
-- Move one ledstrip to ceiling lamp?  (esp32 over Wifi)
-- Bedlamp - How to wire up?
 - How to restore (btn)state when either Mega or Mastery reboots?
 
 
@@ -99,13 +97,11 @@ If you want to fork this repo and customize it, pay special attention to these t
 
 
 ### TODO MEGA!
-- ButtonClass jled  and jled-pca9685-hal
-- analog btn handler & conversion
-- analog "+100" ID support
-  - not really need right? Since analog pins are not duplicate of digital pins
+ - Such empty!
 
 
 ### TODO Electronics!
+ - Replace pwr cable to front LED strip
 
 ## License
 

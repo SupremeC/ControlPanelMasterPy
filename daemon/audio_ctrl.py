@@ -142,7 +142,8 @@ class AudioCtrl:
 
     def start_recording(self) -> bool:
         """Returns immediately. Recording is done in a new thread.
-        Records until StopRecording is called or 30(DEFAULT) seconds has passed.
+        Records until StopRecording is called or
+        30(DEFAULT) seconds has passed.
 
         :Return: bool: True if recording started, False otherwise
         """

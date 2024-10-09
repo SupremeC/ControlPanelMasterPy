@@ -65,7 +65,10 @@ class MyDaemon(DaemonSC):
 
 if __name__ == "__main__":
     daemon = MyDaemon("/tmp/daemon-controlpanel.pid")
-    if len(sys.argv) == 2:
+    if len(sys.argv) != 0:
+        print("no args. Assuming syncronious 'start'")
+        daemon.run()
+    elif len(sys.argv) == 2:
         if "start" == sys.argv[1]:
             print(f"Starting {sys.argv[0]} Daemon...")
             daemon.start()

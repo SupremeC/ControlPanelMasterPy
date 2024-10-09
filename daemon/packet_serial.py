@@ -1,5 +1,5 @@
 """_summary_"""
-#!/usr/bin/env python
+
 
 import logging
 import threading
@@ -102,7 +102,8 @@ class PacketSerial:
         try:
             logger.info("PacketSerial Opening port %s", self.port)
             self._ser = serial.Serial(port=self._port, baudrate=self.BAUDRATE)
-            logger.info("Serial port is " + "open" if self._ser.is_open else "closed")
+            logger.info("Serial port is " +
+                        "open" if self._ser.is_open else "closed")
             if self._readserial_thread is None:
                 self._readserial_thread = threading.Thread(
                     target=self._start_read_packets
@@ -198,7 +199,7 @@ class PacketSerial:
                 time.sleep(0.05)
             except (TimeoutError, Full, cobs.DecodeError) as e:
                 logger.error(e)
-            except cobs.DecodeError as ex:
+            except cobs.DecodeError:
                 logger.error("invalid packet")
         self._rshutdown_flag.clear()
 
@@ -254,7 +255,7 @@ class PacketSerial:
             received (bool): True if incoming, False if outgoing
         """
         alist = self.last_received if received else self.last_sent
-        msg = "packet received: %s" if received else "packet sent: %s"
+        msg = "packet_received: %s" if received else "packet sent: %s"
         alist.append(packet)
         while len(alist) > self.STORE_X_PACKETS_IN_HISTORY:
             del alist[0]

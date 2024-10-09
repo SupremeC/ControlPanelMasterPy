@@ -34,6 +34,11 @@ pip install scipy
 amixer set Master 95%
 amixer set Capture 100%
 
+# console play audio
+sudo apt-get install mpg123
+# mpg123 your-music.mp3  
+# aplay song.wav
+
 # reconnect wifi on lost connection (beware of win chars)
 # https://gist.github.com/carry0987/372b9fefdd8041d0374f4e08fbf052b1
 # dos2unix wifi-reconnect.sh
@@ -59,3 +64,6 @@ arecord --list-devices
 
 #list mics
  python3 -m sounddevice
+
+ # UART Port: we use /dev/serial0, which corresponds to UART1 (GPIO 14 and 15) on the Raspberry Pi.
+ # Baud Rate: Set to 115200

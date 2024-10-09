@@ -6,6 +6,7 @@ Ctrls Class
 - function __load_ctrls contains all hw definitions
 
 """
+
 import datetime
 from dataclasses import dataclass, field
 import logging
@@ -116,29 +117,35 @@ class Hwctrl:
     leds: Optional[List[LEDCtrl]] = field(default_factory=list)
     slaves: Optional[List] = field(default_factory=list)  # List[Hwctrl]
     follow_parent: bool = False
+    hw_type: HWEvent = HWEvent.UNDEFINED
+    invert: bool = False
 
     def __eq__(self, other):
         if isinstance(other, Hwctrl):
             return self.pin == other.pin
         return False
 
-    def add_slave(self, slave: Hwctrl) -> None:
+    def add_slave(self, slave: any) -> None:
         """Add a Slave to this Ctrl"""
         slave.parent = self
         self.slaves.append(slave)
 
-    def set_state(self, new_state: bool) -> List[Packet]:
-        """Set state and optionally returns a packet to turn on related LEDs"""
+    def set_state(self, new_state: bool, report: bool = False) -> List[Packet]:
+        """Set state and optionally returns a packet to turn on related LEDs
+        and slave ctrls"""
+        new_state = not new_state if self.invert else new_state
         self.state = bool(new_state)
         self.quick_state_change = (
             datetime.datetime.now() - self.state_change_date
-        ).total_seconds() < 2
+        ).total_seconds() < 1
         self.state_change_date = datetime.datetime.now()
         packets = self.set_state_of_leds(new_state, True)
+        if report:
+            packets.append(Packet(self.hw_type, self.pin, self.state))
         for slave in self.slaves:
             if not slave.follow_parent:
                 continue
-            packets.extend(slave.set_state(new_state))
+            packets.extend(slave.set_state(new_state, True))
         return packets
 
     def set_state_of_leds(
@@ -206,7 +213,7 @@ class HwCtrls:
                     ps.append(led.set_led_state(new_state))
             for slavectrl in ctrl.slaves:
                 for led in slavectrl.leds:
-                    if not led.led_is_indicator:
+                    if not led.is_indicator:
                         ps.append(led.set_led_state(new_state))
         return ps
 
@@ -329,7 +336,7 @@ class HwCtrls:
         self._list_subspacesat_controls()
         self._list_waveformcollider_controls()
         self._list_aux_controls()
-        self._list_ledstripl_controls()
+        self._list_ledstripWindow_controls()
         self._list_ledstripr_controls()
 
     def _list_ledstripr_controls(self):
@@ -351,7 +358,7 @@ class HwCtrls:
             )
         )
         lsr_preveffect = Hwctrl(
-            pin=33, section="ledstripR", name="RightLedStripPreEffectBtn"
+            pin=34, section="ledstripR", name="RightLedStripPreEffectBtn"
         )
         lsr_preveffect.leds.append(
             LEDCtrl(
@@ -362,7 +369,7 @@ class HwCtrls:
             )
         )
         lsr_nexteffect = Hwctrl(
-            pin=34, section="ledstripR", name="RightLedStripNextEffectBtn"
+            pin=33, section="ledstripR", name="RightLedStripNextEffectBtn"
         )
         lsr_nexteffect.leds.append(
             LEDCtrl(
@@ -373,12 +380,12 @@ class HwCtrls:
             )
         )
         self.ctrls.extend([lsr_pwr, lsr_preveffect, lsr_nexteffect])
-        self.ctrls.append(Analogctrl(pin=105, section="ledstripR", name="R Intensity"))
-        self.ctrls.append(Analogctrl(pin=106, section="ledstripR", name="R Red"))
-        self.ctrls.append(Analogctrl(pin=107, section="ledstripR", name="R Green"))
-        self.ctrls.append(Analogctrl(pin=108, section="ledstripR", name="R Blue"))
+        self.ctrls.append(Analogctrl(pin=58, section="ledstripR", name="R Intensity"))
+        self.ctrls.append(Analogctrl(pin=59, section="ledstripR", name="R Red"))
+        self.ctrls.append(Analogctrl(pin=60, section="ledstripR", name="R Green"))
+        self.ctrls.append(Analogctrl(pin=61, section="ledstripR", name="R Blue"))
 
-    def _list_ledstripl_controls(self):
+    def _list_ledstripWindow_controls(self):
         lsl_pwr = Hwctrl(pin=35, section="ledstripL", name="LeftLedStripPowerBtn")
         lsl_pwr.leds.append(
             LEDCtrl(
@@ -419,19 +426,51 @@ class HwCtrls:
             )
         )
         self.ctrls.extend([lsl_pwr, lsl_preveffect, lsl_nexteffect])
-        self.ctrls.append(Analogctrl(pin=101, section="ledstripL", name="L Intensity"))
-        self.ctrls.append(Analogctrl(pin=102, section="ledstripL", name="L Red"))
-        self.ctrls.append(Analogctrl(pin=103, section="ledstripL", name="L Green"))
-        self.ctrls.append(Analogctrl(pin=104, section="ledstripL", name="L Blue"))
+        self.ctrls.append(Analogctrl(pin=55, section="ledstripL", name="L Intensity"))
+        self.ctrls.append(Analogctrl(pin=54, section="ledstripL", name="L Red"))
+        self.ctrls.append(Analogctrl(pin=56, section="ledstripL", name="L Green"))
+        self.ctrls.append(Analogctrl(pin=57, section="ledstripL", name="L Blue"))
 
     def _list_aux_controls(self):
-        aux_flip1 = Hwctrl(pin=38, section="aux", name="auxFlip1")
-        aux_flip1.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=50, on_value=1))
-        aux_flip1btn = Hwctrl(pin=66, section="aux", name="auxflip1Btn")
-        aux_flip1btn.leds.append(
+        # #################### BED LAMP ############################
+        aux_bedlampFlip = Hwctrl(pin=38, section="aux", name="auxFlipBedlamp")
+        aux_bedlampFlip.leds.append(
+            LEDCtrl(ledboard=PwmBoard.NONE_, pin=50, on_value=1)
+        )
+        aux_bedlampBtn = Hwctrl(pin=67, section="aux", name="auxflipBedlampBtn")
+        aux_bedlampBtn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=9, on_value=PWM_MAX)
         )
-        aux_flip1btn.leds.append(
+        aux_bedlampBtn.add_slave(
+            Hwctrl(
+                pin=45,
+                hw_type=HWEvent.RELAY,
+                invert=True,
+                section="relay",
+                follow_parent=True,
+            )
+        )
+        aux_bedlampFlip.add_slave(aux_bedlampBtn)
+
+        # ###################### BED SOCKET ########################
+        aux_bedSocketFlip = Hwctrl(pin=41, section="aux", name="bedSocketFlip")
+        aux_bedSocketFlip.leds.append(
+            LEDCtrl(ledboard=PwmBoard.NONE_, pin=52, on_value=1)
+        )
+        aux_bedSocketbtn = Hwctrl(pin=66, section="aux", name="bedSocketBtn")
+        aux_bedSocketbtn.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=12, on_value=PWM_MAX)
+        )
+        aux_bedSocketbtn.add_slave(
+            Hwctrl(
+                pin=46,
+                hw_type=HWEvent.RELAY,
+                invert=True,
+                section="relay",
+                follow_parent=True,
+            )
+        )
+        aux_bedSocketbtn.leds.append(
             LEDCtrl(
                 ledboard=PwmBoard.NONE_,
                 pin=48,
@@ -439,29 +478,16 @@ class HwCtrls:
                 is_indicator=True,
             )
         )
-        aux_flip1btn.add_slave(Hwctrl(pin=45, section="relay", follow_parent=True))
-        aux_flip1.add_slave(aux_flip1btn)
+        aux_bedSocketFlip.add_slave(aux_bedSocketbtn)
 
-        ###########################################################
-
-        aux_flip2 = Hwctrl(pin=39, section="aux", name="auxFlip2")
-        aux_flip2.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=51, on_value=1))
-        aux_flip2btn = Hwctrl(pin=67, section="aux", name="auxflip2Btn")
-        aux_flip2btn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=10, on_value=PWM_MAX)
-        )
-        aux_flip2btn.add_slave(Hwctrl(pin=46, section="relay", follow_parent=True))
-        aux_flip2.add_slave(aux_flip2btn)
-
-        ###########################################################
-
-        aux_flip3 = Hwctrl(pin=40, section="aux", name="auxFlip3")
-        aux_flip3.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=52, on_value=1))
-        aux_flip3btn = Hwctrl(pin=68, section="aux", name="auxflip3Btn")
-        aux_flip3btn.leds.append(
+        # ##################### BYRÅ SOCKET ########################
+        aux_drawerFlip = Hwctrl(pin=40, section="aux", name="auxFlipbyrå")
+        aux_drawerFlip.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=51, on_value=1))
+        aux_drawerBtn = Hwctrl(pin=68, section="aux", name="auxflipByråBtn")
+        aux_drawerBtn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=11, on_value=PWM_MAX)
         )
-        aux_flip3btn.leds.append(
+        aux_drawerBtn.leds.append(
             LEDCtrl(
                 ledboard=PwmBoard.NONE_,
                 pin=49,
@@ -469,19 +495,31 @@ class HwCtrls:
                 is_indicator=True,
             )
         )
-        aux_flip2btn.add_slave(Hwctrl(pin=47, section="relay", follow_parent=True))
-        aux_flip3.add_slave(aux_flip3btn)
-
-        ############################################################
-
-        aux_lamp = Hwctrl(pin=41, section="aux", name="bedLampFlip")
-        aux_lamp.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=53, on_value=1))
-        aux_lampbtn = Hwctrl(pin=69, section="aux", name="bedLampBtn")
-        aux_lampbtn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=12, on_value=PWM_MAX)
+        aux_drawerBtn.add_slave(
+            Hwctrl(
+                pin=47,
+                hw_type=HWEvent.RELAY,
+                invert=True,
+                section="relay",
+                follow_parent=True,
+            )
         )
-        aux_lamp.add_slave(aux_lampbtn)
-        self.ctrls.extend([aux_flip1, aux_flip2, aux_flip3, aux_lamp])
+        aux_drawerFlip.add_slave(aux_drawerBtn)
+
+        # ###############         NOT IN USE        ################
+        aux_flip2 = Hwctrl(pin=39, section="aux", name="auxNA")
+        aux_flip2.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=53, on_value=1))
+        aux_flip2btn = Hwctrl(pin=69, section="aux", name="auxNA_Btn")
+        aux_flip2btn.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=10, on_value=PWM_MAX)
+        )
+        aux_flip2btn.add_slave(Hwctrl(pin=44, section="relay", follow_parent=True))
+        aux_flip2.add_slave(aux_flip2btn)
+
+        # #########################################
+        self.ctrls.extend(
+            [aux_bedlampFlip, aux_flip2, aux_drawerFlip, aux_bedSocketFlip]
+        )
 
     def _list_waveformcollider_controls(self):
         for i in range(0, 8):  # including 0, not including 8
@@ -575,7 +613,7 @@ class HwCtrls:
                 is_indicator=True,
             )
         )
-        ma_backl.slaves.append(Hwctrl(pin=43, name="BacklightRelay", section="master"))
+        ma_backl.slaves.append(Hwctrl(pin=44, name="BacklightRelay", section="master"))
 
         ma_inputsw = Hwctrl(pin=15, name="InputsSw", section="master")
         ma_inputsw.leds.append(

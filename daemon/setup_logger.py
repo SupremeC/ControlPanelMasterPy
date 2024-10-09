@@ -7,6 +7,7 @@ from logging import handlers
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
+logger.propagate = False
 formatter = logging.Formatter(
     "%(asctime)s\t%(levelname)s\t%(funcName)10s()\t%(message)s"
 )
@@ -21,8 +22,8 @@ file_handler = handlers.TimedRotatingFileHandler(
 # file_handler = logging.FileHandler('logs.log')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.addHandler(stdout_handler)
+# logger.addHandler(file_handler)
+# logger.addHandler(stdout_handler)
 
 logging.getLogger("Pyro5").setLevel(logging.DEBUG)
 logging.getLogger("Pyro5.core").setLevel(logging.DEBUG)

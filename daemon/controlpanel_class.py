@@ -1,12 +1,11 @@
 """ControlPanel_Class"""
 
-
 import datetime
 import logging
 from queue import Empty, Full, Queue
 from typing import List
 from Pyro5.api import expose
-
+from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
 from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
@@ -18,7 +17,7 @@ logger = logging.getLogger("daemon.ctrlPanel")
 # it was changed in platformio config file in VSCode
 # 256 / 7bytes => 36 packets until buffer is full
 MAX_PACKETS_IN_SEND_QUEUE = 70
-SEND_HELLO_INTERVALL = 30  # seconds
+SEND_HELLO_INTERVALL = 120  # seconds
 
 
 class ControlPanel:
@@ -36,7 +35,9 @@ class ControlPanel:
             self._packet_receivedqueue, self._packet_sendqueue
         )
         self._audioctrl: AudioCtrl = AudioCtrl()
+        self.wled_instance = WLED()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
+        logger.info(self.wled_instance)
 
     def start(self):
         """Opens serial connection and start Read and Write worker threads"""
@@ -99,7 +100,7 @@ class ControlPanel:
                 # A switch has changed status. React
                 self._switch_status_changed(packet)
             elif packet.hw_event == HWEvent.UNDEFINED:
-                logger.warning("Recevied undefined package: %s", packet)
+                logger.warning("Received undefined package: %s", packet)
         except Full as err_full:
             logger.error(err_full)
         except Exception as error:
@@ -129,14 +130,14 @@ class ControlPanel:
 
             self.send_packets(p_tosend)
             p_tosend.clear()
-            if not inputsw.state:
+            if not mastersw.state or not inputsw.state:
                 return
 
             if packet.target >= 2 and packet.target <= 11 and packet.val == 1:
                 self._audioctrl.recsaved_play(packet.target)
             if packet.target >= 2 and packet.target <= 11 and packet.val == 100:
                 self._audioctrl.restore_original_audio(packet.target)
-            if packet.target >= 17 and packet.target <= 26:  # pin 20,21 is excluded
+            if packet.target >= 17 and packet.target <= 26:  # pin 20,21exclud
                 self._audioctrl.apply_effect(packet, self)
             if packet.target == 27 and packet.val:
                 self._audioctrl.sysaudio_play(aevent.REC_STARTED)
@@ -145,17 +146,12 @@ class ControlPanel:
                 self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
                 self._audioctrl.stop_recording()
             if packet.target >= 66 and packet.target <= 69:
-                ctrl = self._ctrls.get_slavectrl(packet.target)
-                if ctrl.parent.state:
-                    new_state = not ctrl.state
-                    self.send_packets(ctrl.set_state(new_state))
-                    self.send_packets(ctrl.slaves[0].set_state(new_state))
-                # self._set_relays(ctrl)
+                self._set_relays(packet, is_safetyctrl=False)
             if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
             if packet.target >= 38 and packet.target <= 41:
-                self._set_relays(packet, safetyctrl=True)
-            if packet.target >= 52 and packet.target <= 59:  # lestrip_analog
+                self._set_relays(packet, is_safetyctrl=True)
+            if packet.target >= 52 and packet.target <= 59:  # ledtrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
             if packet.target == 60:
@@ -175,7 +171,7 @@ class ControlPanel:
             relay.set_state(bool(packet.val))
             send = []
             send = ctrl.set_state(packet.val)
-            send.append(Packet(HWEvent.RELAY, relay.pin, 1))
+            send.append(Packet(HWEvent.RELAY, relay.pin, 1 if packet.val == 0 else 0))
             if ctrl.quick_state_change:
                 logger.info(
                     "All non-indicator LEDs ON"
@@ -185,27 +181,27 @@ class ControlPanel:
                 send.extend(self._ctrls.set_all_nonindicatorleds(relay.state))
             self.send_packets(send)
 
-    def audio_volume(self, packet: Packet = None, new_vol: int = None) -> None:
+    def audio_volume(self, new_vol: int = None) -> None:
         """Clamps volume to 0-100, and sets master volume"""
-        vol = None
-        if packet is not None and packet.val is not None:
-            vol = LEDCtrl.clamp(packet.val, 0, 100)
-        elif new_vol is not None:
-            vol = LEDCtrl.clamp(new_vol, 0, 100)
-        else:
-            return
-        self._audioctrl.set_volume(vol)
+        vol = LEDCtrl.clamp(new_vol, 0, 100)
+        return self._audioctrl.set_volume(vol)
 
-    def _set_relays(self, packet: Packet, safetyctrl: bool = False):
+    def _set_relays(self, packet: Packet, is_safetyctrl: bool = False):
         try:
-            if safetyctrl:
+            if is_safetyctrl:
                 flipsw = self._ctrls.get_ctrl(packet.target)
-                flipsw.set_state(bool(packet.val))
-                self.send_packets(flipsw.set_state_of_leds(bool(packet.val), True))
+                new_state = bool(packet.val)
+                if new_state:
+                    pass
+                else:
+                    # turn off slave relay
+                    self.send_packets(flipsw.slaves[0].set_state(False))
+                flipsw.set_state(new_state)
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
-                btn.set_state(not btn.state)  # invert, since btn is momentary
-                self.send_packets(btn.set_state(bool(packet.val)))  # set RELAY state
+                if btn.parent.state:
+                    new_state = packet.val if packet.target == 67 else not btn.state
+                    self.send_packets(btn.set_state(new_state))
 
         except Full:
             logger.exception("Sendqueue was full. Packet(s) could not be sent")
@@ -213,18 +209,44 @@ class ControlPanel:
             logger.exception("Ctrl not found")
             raise
 
-        # TODO
-        # IF ControlSwitch=ON, set relay!
-        # relayPin = packet.target + 16
-        # self._packet_sendqueue.put(Packet(HWEvent.SWITCH, relayPin, packet.val))
-
     def ledstrip_control(self, packet: Packet):
-        """TODO"""
+        """Sends commands (translated from packet) to LED-strip"""
+        if packet.target == 35:  # on/off/reset
+            segmentId = 1
+            if packet.val == 100:
+                self.wled_instance._change_effect(0, segmentId)
+                return
+            segment_state = (
+                self.wled_instance.read_state().seg_state[segmentId].seg_state
+            )
+            red_ctrl = self._ctrls.get_ctrl(packet.target)
+            self.send_packets(red_ctrl.set_state(not segment_state))
+            self.wled_instance.toggle_wled_state(segmentId)
+        if packet.target == 36:
+            self.wled_instance.previous_effect(1)
+        if packet.target == 37:
+            self.wled_instance.next_effect(1)
+        if packet.target == 55:
+            self.wled_instance.set_brightness(self.map_value(packet.val), 1)
+        if packet.target >= 54 and packet.target <= 57:
+            self._ctrls.get_ctrl(packet.target).set_state(self.map_value(packet.val))
+            red_ctrl = self._ctrls.get_ctrl(54)
+            green_ctrl = self._ctrls.get_ctrl(56)
+            blue_ctrl = self._ctrls.get_ctrl(57)
+            color = [red_ctrl.state, green_ctrl.state, blue_ctrl.state]
+            self.wled_instance.set_color(color, 1)
+
+    def map_value(self, value, in_min=0, in_max=1023, out_min=0, out_max=255):
+        # Ensure value is within the input range
+        value = max(in_min, min(value, in_max))
+        # Map the value
+        return (value - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
 
     def send_packets(
         self, packets: List, block: bool = False, timeout: float = None
     ) -> None:
-        """Puts the packet into sendQueue. It will be picked up ASAP by packetSerial thread"""
+        """Puts the packet into sendQueue.
+        It will be picked up ASAP by packetSerial thread"""
         try:
             for p in packets:
                 self._packet_sendqueue.put(p, block, timeout)
@@ -250,7 +272,7 @@ class ControlPanel:
         try:
             self._ctrls.reset()
             self.clear_packet_queue()
-            # send RequestStatus packet to get actual ctrls status
+            # send RequestStatus packet to get ctrls status
             self._packet_sendqueue.put(
                 Packet(HWEvent.STATUS, 1, 1), block=True, timeout=1
             )
@@ -353,7 +375,7 @@ class ControlPanel:
         return "ON" if b else "OFF"
 
 
-# Button(s) pin,name,section,coordXY
-# LEDS      pin,name,section,coordXY,board,minV,maxV
-#
-# Button LEDS (pin nr, PWMboard.#.pin)
+if __name__ == "__main__":
+    myCP = ControlPanel()
+    myCP.start()
+    pass
