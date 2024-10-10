@@ -13,7 +13,7 @@ git config --global user.name "David Berglund"
 #              HostName 192.168.150.33
 #              User david
 #              PreferredAuthentications publickey
-#              IdentityFile "/Users/david/.ssh/keys/id_ed25519"
+#              IdentityFile "/Users/dbe/.ssh/keys/id_ed25519"
 
 
 sudo apt-get install -y rubberband-cli
