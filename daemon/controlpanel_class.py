@@ -3,13 +3,14 @@
 import datetime
 import logging
 from queue import Empty, Full, Queue
+import time
 from typing import List
 from Pyro5.api import expose
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
 from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
-from .packet import HWEvent, Packet  # noqa
+from .packet import HWEvent, Packet, BlinkTarget  # noqa
 from .packet_serial import PacketSerial
 
 logger = logging.getLogger("daemon.ctrlPanel")
@@ -62,6 +63,7 @@ class ControlPanel:
             self.reset()
             self._pserial.close_connection()
             self.pyrodaemon.stop()
+            self.wled_instance.close_serial_conn()
         except Exception as e:
             logger.error(e)
 
@@ -118,6 +120,7 @@ class ControlPanel:
                 mastersw.state = bool(packet.val)
                 if not mastersw.state:
                     p_tosend.extend(self._ctrls.set_all_leds(False))
+                    self.wled_instance.set_wled_state(False)
                     self.send_packets(p_tosend)
                     return
             if packet.target == inputsw.pin:  # Inputs on / off
@@ -155,7 +158,9 @@ class ControlPanel:
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
             if packet.target == 60:
-                self.audio_volume(packet=packet)
+                self.audio_volume(
+                    self.map_value(val=packet.val, out_min=0, out_max=100)
+                )
         except Exception:
             logger.error(packet)
             logger.exception("exception in function switch_status_changed()")
@@ -192,10 +197,16 @@ class ControlPanel:
                 flipsw = self._ctrls.get_ctrl(packet.target)
                 new_state = bool(packet.val)
                 if new_state:
+                    self.send_packets(flipsw.slaves[0].leds[0].blink(True))
                     pass
                 else:
-                    # turn off slave relay
-                    self.send_packets(flipsw.slaves[0].set_state(False))
+                    if packet.target == 38:
+                        self.send_packets(flipsw.slaves[0].set_state(True))
+                        time.sleep(0.1)
+                        self.send_packets(flipsw.slaves[0].set_state(False))
+                    else:
+                        # turn off slave relay
+                        self.send_packets(flipsw.slaves[0].set_state(False))
                 flipsw.set_state(new_state)
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
@@ -236,11 +247,11 @@ class ControlPanel:
             color = [red_ctrl.state, green_ctrl.state, blue_ctrl.state]
             self.wled_instance.set_color(color, 1)
 
-    def map_value(self, value, in_min=0, in_max=1023, out_min=0, out_max=255):
+    def map_value(self, val, in_min=0, in_max=1023, out_min=0, out_max=255):
         # Ensure value is within the input range
-        value = max(in_min, min(value, in_max))
+        val = max(in_min, min(val, in_max))
         # Map the value
-        return (value - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
+        return (val - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
 
     def send_packets(
         self, packets: List, block: bool = False, timeout: float = None

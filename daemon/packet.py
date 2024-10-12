@@ -1,7 +1,6 @@
 """Packet is the class used to send and receive data from Arduino
 """
 
-
 from datetime import datetime
 import logging
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ class HWEvent(IntEnum):
     I2CCLED = 4
     SWITCH = 5
     DEMO = 6
-    BLINK = 7
+    BLINKFOREVER = 7
     STATUS = 8
     """ Status report of a ctrl/led/relay. Does this hold up? """
     HELLO = 9
@@ -32,6 +31,10 @@ class HWEvent(IntEnum):
     LOOPDURATION = 12
     RELAY = 13
     NOOP = 14
+    STATUSLLED = 15
+    STATUSRLED = 16
+    BLINK3ENDLOW = 17
+    BLINK3ENDHIGH = 18
 
 
 @unique
@@ -43,9 +46,10 @@ class ErrorType(IntEnum):
     LEDINVALIDVALUE = 2
     INVALIDTARGET = 3
     INVALIDPWMBOARD = 4
-    INVALIDBLINKTARGET = 5
+    INVALIDBLINKFOREVERTARGET = 5
     INVALIDBLINKVALUE = 6
-    FAILEDTOPARSEPACKET = 7
+    INVALIDBLINKTARGET = 7
+    FAILEDTOPARSEPACKET = 8
     OTHER_ = 254
 
 
@@ -55,6 +59,7 @@ class BlinkTarget(IntEnum):
 
     AUDIO_PRESETBTNS = 200
     SPEAKER_LEDS = 201
+    EFFECT_BTNS = 202
 
 
 @unique

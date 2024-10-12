@@ -1,11 +1,17 @@
 from enum import unique, Flag, auto
 import datetime
+import logging
+import queue
 import random
+import threading
 import serial
 import json
 import time
 from typing import Dict, Any, NamedTuple, Optional
 from typing import List
+
+
+logger = logging.getLogger("daemon.WLED")
 
 
 @unique
@@ -68,24 +74,67 @@ class WLED:
             baud_rate (int): Baud rate. Needs to be configured
             the same in WLED.
         """
+        self.command_queue = queue.Queue(maxsize=10)
+        self.lock = threading.Lock()
+        self.sending_thread = threading.Thread(
+            target=self._send_cmd_from_queue, daemon=True
+        )
+        self.sending_thread.start()  # Start the sending thread
         self._uart_port = uart_port
         self._baud_rate = baud_rate
-        self._ser = serial.Serial(self._uart_port, self._baud_rate, timeout=1)
+        self._ser_timeout = 2
+        self._ser = serial.Serial(
+            self._uart_port, self._baud_rate, timeout=self._ser_timeout
+        )
 
-    def set_wled_state(self, on: bool) -> None:
-        data_to_send = {"on": on}
-        self._send_cmd(data_to_send)
+    def check_serial_connection(self):
+        try:
+            if not self._ser.is_open:
+                self._ser.open()
+                time.sleep(0.1)
+                if self._ser.is_open():
+                    logger.info(f"Established connection on {self._uart_port}.")
+                else:
+                    logger.info("Failed to establish connection")
+        except serial.SerialException as e:
+            logger.error(f"Error with the serial connection: {e}")
+            try:
+                # Attempt to reestablish connection
+                ser = serial.Serial(
+                    self._uart_port, self._baud_rate, timeout=self._ser_timeout
+                )
+                time.sleep(0.1)
+                logger.info(f"Reestablished connection on {self._uart_port}.")
+                return ser
+            except serial.SerialException as e:
+                logger.info(f"Failed to reestablish connection: {e}")
+                return None
+
+    def close_serial_conn(self) -> None:
+        logger.info("WLED serial connection closed")
+        self._ser.close()
+
+    def set_wled_state(self, on: bool, segment: Optional[int] = None) -> None:
+        """Set on/off state for a specific segment, or ALL
+        segments if no segmentID is passed in"""
+        if segment is not None:
+            data_to_send = {"seg": [{"id": segment, "on": on}]}
+            self._enqueue_command(data_to_send)
+        status = self.read_state()
+        for seg in status.seg_state:
+            data_to_send = {"seg": [{"id": seg.seg_id, "on": on}]}
+            self._enqueue_command(data_to_send)
 
     def toggle_wled_state(self, segment: Optional[int] = None) -> None:
         if segment is None:
             data_to_send = {"on": "t"}
         else:
             data_to_send = {"seg": [{"id": segment, "on": "t"}]}
-        self._send_cmd(data_to_send)
+        self._enqueue_command(data_to_send)
 
     def read_state(self) -> WledStateSnapshot:
         data_to_send = {"v": True}
-        self._send_cmd(data_to_send)
+        self._enqueue_command(data_to_send)
         json = self._read_whole_json_message()
         wled_state = json["state"]["on"]
         seg_count = len(json["state"]["seg"])
@@ -110,15 +159,18 @@ class WLED:
         if len(color) == 3:
             color = [max(0, min(item, 255)) for item in color]
             # data_to_send = {"seg": [{"id": segment, "fx": 0, "col": [color]}]}
-            data_to_send = {"seg": [{"id": segment, "col": [color]}]}
-            self._send_cmd(data_to_send)
+            data_to_send = {
+                "seg": [{"id": segment, "col": [color]}],
+                "udpn.send": False,
+            }
+            self._enqueue_command(data_to_send)
 
     def set_brightness(self, brightness: int, segment: int) -> None:
         # seg.id = Zero-indexed ID of the segment
         # bri. 0 to 255 (Brightness)
         brightness = max(0, min(brightness, 255))
         data_to_send = {"seg": [{"id": segment, "bri": brightness}]}
-        self._send_cmd(data_to_send)
+        self._enqueue_command(data_to_send)
 
     def next_effect(self, segment: int) -> None:
         self._change_effect("~", segment)
@@ -134,16 +186,34 @@ class WLED:
         fxdef = Forces loading of effect defaults (speed, intensity, etc)
         from effect metadata. (Bool)
         """
-        data_to_send = {"seg": [{"id": segment, "fx": fx, "fxdef": True}]}
-        self._send_cmd(data_to_send)
+        data_to_send = {
+            "seg": [{"id": segment, "fx": fx, "fxdef": True}],
+            "udpn.send": False,
+        }
+        self._enqueue_command(data_to_send)
 
-    def _send_cmd(self, data) -> None:
-        try:
-            # Convert Python dictionary to JSON string
-            json_data = json.dumps(data)
-            self._ser.write((json_data + "\n").encode())
-        except Exception as e:
-            print(f"Error sending JSON: {e}")
+    def _enqueue_command(self, command: dict):
+        """Thread-safe function to add commands to the queue."""
+        with self.lock:
+            if self.command_queue.full():
+                # Discard the oldest command (first in queue)
+                self.command_queue.get()
+            self.command_queue.put(command)
+
+    def _send_cmd_from_queue(self):
+        """Thread function that sends commands from the queue."""
+        while True:
+            try:
+                # Get command from the queue (blocks until an item is available)
+                command = self.command_queue.get()
+                self.check_serial_connection()
+                json_data = json.dumps(command)
+                self._ser.write((json_data + "\n").encode())
+                self._ser.flush()
+                self.command_queue.task_done()
+                time.sleep(0.01)
+            except serial.SerialException as e:
+                logger.error(f"Error sending JSON command: {e}")
 
     def _read_whole_json_message(self) -> Dict[str, Any]:
         start_time = time.time()
@@ -211,7 +281,7 @@ if __name__ == "__main__":
             print(result)
         elif choice == "3":
             data_to_send = {"v": True}
-            wled_instance._send_cmd(data_to_send)
+            wled_instance._enqueue_command(data_to_send)
             json_string = wled_instance._read_whole_json_message()
             json_string = json.dumps(json_string, indent=4)
             print(f"Received: {json_string}")

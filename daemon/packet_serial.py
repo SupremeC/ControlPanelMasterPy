@@ -1,6 +1,5 @@
 """_summary_"""
 
-
 import logging
 import threading
 import time
@@ -102,8 +101,7 @@ class PacketSerial:
         try:
             logger.info("PacketSerial Opening port %s", self.port)
             self._ser = serial.Serial(port=self._port, baudrate=self.BAUDRATE)
-            logger.info("Serial port is " +
-                        "open" if self._ser.is_open else "closed")
+            logger.info("Serial port is " + "open" if self._ser.is_open else "closed")
             if self._readserial_thread is None:
                 self._readserial_thread = threading.Thread(
                     target=self._start_read_packets

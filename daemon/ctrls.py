@@ -20,6 +20,7 @@ SWITCH_ON: bool = True
 PWM_MAX: int = 4094
 PWM_MED: int = 2000
 PWM_LOW: int = 800
+DEFAULT_PWM: int = PWM_LOW
 LED_ON: bool = True
 LED_OFF: bool = False
 
@@ -44,6 +45,7 @@ class LEDCtrl:
     pin: int = NO_LED
     state: int = LED_OFF
     on_value: int = 1
+    max_value: int = 1
     is_indicator: bool = False
     follow_invert: bool = False
 
@@ -64,6 +66,15 @@ class LEDCtrl:
         raise LEDException(
             "Could not change state of LED because no PIN was configured"
         )
+
+    def blink(self, endHigh: bool = True) -> List[Packet]:
+        if self.ledboard == PwmBoard.NONE_:
+            return
+        p = 20 + self.pin if self.ledboard == PwmBoard.I2CBLED else 40 + self.pin
+        e = HWEvent.BLINK3ENDHIGH if endHigh else HWEvent.BLINK3ENDLOW
+        if e == HWEvent.BLINK3ENDHIGH:
+            self.set_led_state(800)
+        return [Packet(e, p, 2)]
 
     @staticmethod
     def clamp(val: int, minval: int, maxval: int) -> int:
@@ -345,7 +356,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=5,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
@@ -353,7 +364,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=8,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -364,7 +375,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=6,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
@@ -375,15 +386,21 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=7,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
-        self.ctrls.extend([lsr_pwr, lsr_preveffect, lsr_nexteffect])
-        self.ctrls.append(Analogctrl(pin=58, section="ledstripR", name="R Intensity"))
-        self.ctrls.append(Analogctrl(pin=59, section="ledstripR", name="R Red"))
-        self.ctrls.append(Analogctrl(pin=60, section="ledstripR", name="R Green"))
-        self.ctrls.append(Analogctrl(pin=61, section="ledstripR", name="R Blue"))
+        r_int = Analogctrl(pin=58, section="ledstripR", name="R Intensity")
+        r_int.set_state(125)
+        r_red = Analogctrl(pin=59, section="ledstripR", name="R Red")
+        r_red.set_state(125)
+        r_green = Analogctrl(pin=60, section="ledstripR", name="R Green")
+        r_green.set_state(125)
+        r_blue = Analogctrl(pin=61, section="ledstripR", name="R Blue")
+        r_blue.set_state(125)
+        self.ctrls.extend(
+            [lsr_pwr, lsr_preveffect, lsr_nexteffect, r_int, r_red, r_green, r_blue]
+        )
 
     def _list_ledstripWindow_controls(self):
         lsl_pwr = Hwctrl(pin=35, section="ledstripL", name="LeftLedStripPowerBtn")
@@ -391,7 +408,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=1,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
@@ -399,7 +416,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=4,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -410,7 +427,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=2,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
@@ -421,15 +438,21 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=3,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=False,
             )
         )
-        self.ctrls.extend([lsl_pwr, lsl_preveffect, lsl_nexteffect])
-        self.ctrls.append(Analogctrl(pin=55, section="ledstripL", name="L Intensity"))
-        self.ctrls.append(Analogctrl(pin=54, section="ledstripL", name="L Red"))
-        self.ctrls.append(Analogctrl(pin=56, section="ledstripL", name="L Green"))
-        self.ctrls.append(Analogctrl(pin=57, section="ledstripL", name="L Blue"))
+        l_int = Analogctrl(pin=55, section="ledstripL", name="L Intensity")
+        l_int.set_state(125)
+        l_red = Analogctrl(pin=54, section="ledstripL", name="L Red")
+        l_red.set_state(125)
+        l_green = Analogctrl(pin=56, section="ledstripL", name="L Green")
+        l_green.set_state(125)
+        l_blue = Analogctrl(pin=57, section="ledstripL", name="L Blue")
+        l_blue.set_state(125)
+        self.ctrls.extend(
+            [lsl_pwr, lsl_preveffect, lsl_nexteffect, l_int, l_red, l_green, l_blue]
+        )
 
     def _list_aux_controls(self):
         # #################### BED LAMP ############################
@@ -439,7 +462,7 @@ class HwCtrls:
         )
         aux_bedlampBtn = Hwctrl(pin=67, section="aux", name="auxflipBedlampBtn")
         aux_bedlampBtn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=9, on_value=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=12, on_value=DEFAULT_PWM)
         )
         aux_bedlampBtn.add_slave(
             Hwctrl(
@@ -459,7 +482,7 @@ class HwCtrls:
         )
         aux_bedSocketbtn = Hwctrl(pin=66, section="aux", name="bedSocketBtn")
         aux_bedSocketbtn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=12, on_value=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=11, on_value=DEFAULT_PWM)
         )
         aux_bedSocketbtn.add_slave(
             Hwctrl(
@@ -485,7 +508,7 @@ class HwCtrls:
         aux_drawerFlip.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=51, on_value=1))
         aux_drawerBtn = Hwctrl(pin=68, section="aux", name="auxflipByråBtn")
         aux_drawerBtn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=11, on_value=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=10, on_value=DEFAULT_PWM)
         )
         aux_drawerBtn.leds.append(
             LEDCtrl(
@@ -511,7 +534,7 @@ class HwCtrls:
         aux_flip2.leds.append(LEDCtrl(ledboard=PwmBoard.NONE_, pin=53, on_value=1))
         aux_flip2btn = Hwctrl(pin=69, section="aux", name="auxNA_Btn")
         aux_flip2btn.leds.append(
-            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=10, on_value=PWM_MAX)
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=9, on_value=DEFAULT_PWM)
         )
         aux_flip2btn.add_slave(Hwctrl(pin=44, section="relay", follow_parent=True))
         aux_flip2.add_slave(aux_flip2btn)
@@ -525,7 +548,7 @@ class HwCtrls:
         for i in range(0, 8):  # including 0, not including 8
             wf_effbtn = Hwctrl(pin=i + 17, section="waveform", name=f"effectbtn{i+7}")
             wf_effbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i + 4, on_value=PWM_MAX)
+                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i + 4, on_value=DEFAULT_PWM)
             )
             self.ctrls.append(wf_effbtn)
 
@@ -534,7 +557,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CBLED,
                 pin=12,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -542,7 +565,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CBLED,
                 pin=13,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -550,7 +573,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CBLED,
                 pin=14,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -558,7 +581,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CBLED,
                 pin=15,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -566,30 +589,32 @@ class HwCtrls:
             pin=109, section="waveform", name="volumectrl"
         )  # Volume ctrl
         wf_rec = Hwctrl(pin=27, section="waveform", name="recordbtn")
-        wf_rec.leds.append(LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=0, on_value=PWM_MAX))
+        wf_rec.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=0, on_value=DEFAULT_PWM)
+        )
         self.ctrls.extend([wf_speaker, wf_volumectrl, wf_rec])
 
     def _list_subspacesat_controls(self):
         for i in range(0, 6):  # including 0, not including 6
             sscflip = Hwctrl(pin=NO_PIN, section="subspace", name=f"sscflip{i+1}")
             sscflip.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 10, on_value=PWM_MAX)
+                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 10, on_value=DEFAULT_PWM)
             )
 
             sscbtn = Hwctrl(pin=i + 2, section="subspace", name=f"sccbtn{i+1}")
             sscbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i, on_value=PWM_MAX)
+                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i, on_value=DEFAULT_PWM)
             )
             self.ctrls.extend([sscflip, sscbtn])
         for i in range(0, 4):  # including 0, not including 4
             sscflip = Hwctrl(pin=NO_PIN, section="subspace", name=f"sscflip{i+7}")
             sscflip.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i, on_value=PWM_MAX)
+                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i, on_value=DEFAULT_PWM)
             )
 
             sscbtn = Hwctrl(pin=i + 8, section="subspace", name=f"sccbtn{i+7}")
             sscbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 6, on_value=PWM_MAX)
+                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 6, on_value=DEFAULT_PWM)
             )
             self.ctrls.extend([sscflip, sscbtn])
 
@@ -609,7 +634,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=15,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -628,7 +653,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=14,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
@@ -646,7 +671,7 @@ class HwCtrls:
             LEDCtrl(
                 ledboard=PwmBoard.I2CCLED,
                 pin=13,
-                on_value=PWM_MAX,
+                on_value=DEFAULT_PWM,
                 is_indicator=True,
             )
         )
