@@ -12,10 +12,10 @@ import soundfile as sf
 # amixer set Capture 100%
 
 
-filename = 'music.wav'
+filename = (
+    "/home/david/source/cpPy/ControlPanelMasterPy/daemon/systemsounds/2m10s_piano.wav"
+)
 # Extract data and sampling rate from file
-data, fs = sf.read(filename, dtype='float32')
+data, fs = sf.read(filename, dtype="float32")
 sd.play(data, fs)
 status = sd.wait()  # Wait until file is done playing
-sd.InputStream(samplerate=0, device="",
-               channels=2, callback=None)

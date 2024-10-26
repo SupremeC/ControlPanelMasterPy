@@ -12,6 +12,8 @@ from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet, BlinkTarget  # noqa
 from .packet_serial import PacketSerial
+from openaiWrapper import OpenAiWrapper
+from gCalender import Calender
 
 logger = logging.getLogger("daemon.ctrlPanel")
 # The buffer of Arduino is increased to 256 bytes (if it works)
@@ -35,6 +37,8 @@ class ControlPanel:
         self._pserial: PacketSerial = PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue
         )
+        self.cal = Calender()
+        self.ai = OpenAiWrapper()
         self._audioctrl: AudioCtrl = AudioCtrl()
         self.wled_instance = WLED()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
@@ -118,18 +122,21 @@ class ControlPanel:
 
             if packet.target == 12:  # MainSwitch
                 mastersw.state = bool(packet.val)
-                if not mastersw.state:
+                if mastersw.state:
+                    self._audioctrl.sysaudio_play(aevent.SYSTEM_ON)
+                else:
                     p_tosend.extend(self._ctrls.set_all_leds(False))
                     self.wled_instance.set_wled_state(False)
+                    self._audioctrl.sysaudio_play(aevent.SYSTEM_OFF)
                     self.send_packets(p_tosend)
                     return
             if packet.target == inputsw.pin:  # Inputs on / off
                 p_tosend.extend(inputsw.set_state(bool(packet.val)))
             if packet.target == 14:  # Backlight
-                self.cp_lights(packet)
+                self.cp_bg_lights(packet)
             if packet.target == soundsw.pin:  # Sound on / off
                 p_tosend.extend(soundsw.set_state(bool(packet.val)))
-                self.audio_volume(new_vol=0)
+                self._audioctrl.enable_sound(bool(packet.val))
 
             self.send_packets(p_tosend)
             p_tosend.clear()
@@ -157,7 +164,7 @@ class ControlPanel:
             if packet.target >= 52 and packet.target <= 59:  # ledtrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
-            if packet.target == 60:
+            if packet.target == 62:
                 self.audio_volume(
                     self.map_value(val=packet.val, out_min=0, out_max=100)
                 )
@@ -168,11 +175,16 @@ class ControlPanel:
             if not no_action:
                 self.send_packets(p_tosend)
 
-    def cp_lights(self, packet: Packet) -> None:
-        """background light ON/OFF and ctrl LEDs"""
+    def cp_bg_lights(self, packet: Packet) -> None:
+        """background light ON/OFF"""
         if packet.target == 14:
             ctrl = self._ctrls.get_ctrl_by_name("BacklightSw")
             relay = self._ctrls.get_ctrl_by_name("BacklightRelay")
+            if packet.val:
+                self._audioctrl.sysaudio_play(aevent.BG_LIGHT_ON)
+            else:
+                self._audioctrl.sysaudio_play(aevent.BG_LIGHT_OFF)
+
             relay.set_state(bool(packet.val))
             send = []
             send = ctrl.set_state(packet.val)
@@ -207,10 +219,12 @@ class ControlPanel:
                     else:
                         # turn off slave relay
                         self.send_packets(flipsw.slaves[0].set_state(False))
+                self._audioctrl.sysaudio_play(aevent.FLIP_SWITCH)
                 flipsw.set_state(new_state)
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
                 if btn.parent.state:
+                    self._audioctrl.sysaudio_play(aevent.BTN_CLICKED)
                     new_state = packet.val if packet.target == 67 else not btn.state
                     self.send_packets(btn.set_state(new_state))
 

@@ -41,6 +41,7 @@ class SysAudioEvent(IntEnum):
     AUDIO_OFF = 67
     RELAY_ON = 70
     RELAY_OFF = 71
+    FLIP_SWITCH = 90
     FAILED = 200
     TICK = 254
 
@@ -65,6 +66,7 @@ class AudioCtrl:
     __storagedir: Path = None
     __systemsoundsdir: Path = None
     __master_volume: int = 20
+    __sound_on: bool = True
 
     def __init__(self):
         root = daemon.global_variables.root_path.resolve()
@@ -76,10 +78,11 @@ class AudioCtrl:
         self.rec_ctrl = AudioRec(folder=self.__tempdir)
         self.effect_ctrl = AudioEffect()
 
-        # init() channels refers to mono vs stereo, not playback Channel object
+        # init() 'channels' refers to mono vs stereo, not playback Channel object
         mixer.init(48000, -16, channels=1, buffer=1024)
         mixer.set_num_channels(8)
         mixer.set_reserved(1)
+        self.enable_sound(True)
         self.set_volume(50)  # 0-100
         audioclipsfound = self.__load_sound_library(self.__systemsoundsdir)
         print(f"Found {audioclipsfound} of audio clips")
@@ -93,6 +96,12 @@ class AudioCtrl:
         volume = AudioCtrl.__clamp(volume, 0, 100)
         self.__master_volume = volume / 100
 
+    def get_volume(self) -> int:
+        return self.__master_volume if self.__sound_on else 0
+
+    def enable_sound(self, on: bool) -> None:
+        self.__sound_on = on
+
     def recsaved_play(self, pin: int = None) -> None:
         """Plays sound linked to pinNr"""
         if pin is None:
@@ -103,7 +112,7 @@ class AudioCtrl:
             self.sysaudio_play(SysAudioEvent.FAILED)
             return
         sound = mixer.Sound()
-        sound.set_volume(self.__master_volume)
+        sound.set_volume(self.get_volume())
         mixer.find_channel(force=True).play(sound, loops=0)
 
     def restore_original_audio(self, pin: int) -> None:
@@ -133,7 +142,7 @@ class AudioCtrl:
             )
             return
         sound = mixer.Sound(self.systemsounds[key])
-        sound.set_volume(self.__master_volume)
+        sound.set_volume(self.get_volume())
         mixer.find_channel(force=True).play(sound, loops=0)
 
     def stop_all_audio(self) -> None:
@@ -189,13 +198,13 @@ class AudioCtrl:
 
     def save_to_hwswitch(self, switch: int) -> str:
         """Moves audio file to storage.
-        This effectivly links audio file to HwCtrl button."""
+        This effectively links audio file to HwCtrl button."""
         if self.current_filepath is None or self.current_filepath == "":
             logger.error("Could not assign audio to Btn because soundfile path empty")
             raise AudioFilePathEmptyException(
                 "Could not assign audio to Btn because soundfile path empty"
             )
-        destfile = self.__storagedir / f"btn_{switch}.wave"
+        destfile = self.__storagedir / f"btn_{switch}.wav"
         if self.current_filepath == destfile:
             return self.current_filepath
         if self.file_exist(destfile):
@@ -219,7 +228,7 @@ class AudioCtrl:
         # self.sysaudio_play(SysAudioEvent.EFFECT_APPLY_DONE)
         sound = mixer.Sound(self.current_filepath)
         self.effects_running = False
-        sound.set_volume(self.__master_volume)
+        sound.set_volume(self.get_volume())
         mixer.find_channel(force=True).play(sound, loops=0)
 
     def __build_tmp_filename(self, suffix) -> str:

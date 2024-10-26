@@ -1,4 +1,5 @@
 """Audio Effect"""
+
 from enum import IntEnum
 import logging
 import wave
@@ -55,9 +56,9 @@ class AudioEffect:
         elif effect == EffectType.REVERSE:
             return self.reverse(infile, outfile)
         elif effect == EffectType.TIMECOMPRESS:
-            return self.time_stretch(infile, outfile, 0.5)
+            return self.time_stretchf(infile, outfile, 0.5)
         elif effect == EffectType.TIMESTRETCH:
-            return self.time_stretch(infile, outfile, 1.5)
+            return self.time_stretchf(infile, outfile, 1.5)
         elif effect == EffectType.PITCHHIGHER:
             return self.pitch(infile, outfile, 3)
         elif effect == EffectType.PITCHLOWER:
@@ -74,7 +75,7 @@ class AudioEffect:
 
     # TODO - function has same name as pedalboard function 'time_stretch'
     # rename!
-    def time_stretch(self, infile: str, outfile: str, stretch: float) -> str:
+    def time_stretchf(self, infile: str, outfile: str, stretch: float) -> str:
         """TODO: Pedalboard have implemented timestrech but cannot make it work
         #  - Time_stretch is a function instead of class (expected)
         # board = Pedalboard([time_stretch(stretch_factor=stretch)])
@@ -83,6 +84,12 @@ class AudioEffect:
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
         sf.write(outfile, yw, sr, format="wav")
+        # ----- test pedalboard strectch
+        """Reverb effect"""
+        board = Pedalboard(
+            [Chorus(), Reverb(room_size=0.25), Gain(gain_db=10), time_stretch()]
+        )
+        self._apply_board(board, infile, outfile)
         return outfile
 
     def pitch(self, infile: str, outfile: str, pitch: float) -> str:

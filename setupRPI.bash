@@ -4,6 +4,11 @@ sudo apt-get upgrade
 git config --global user.email "thedeepermeaningofliff@gmail.com"
 git config --global user.name "David Berglund"
 
+# To activate the python virtual environment
+cd /home/david/source/cpPy/ControlPanelMasterPy
+source bin/activate
+
+
 #Create SSH keys so that I don't need to enter the password every time from VSC
 # -> ssh-keygen
 # -> rename the public Key to"authorized_keys" and place it in home/pi/.ssh/

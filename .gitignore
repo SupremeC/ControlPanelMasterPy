@@ -8,3 +8,11 @@ pyro_uri.text
 *.~vsdx
 *.vsdx
 daemon/__pycache__/packet.cpython-39.pyc
+*.secretkey
+client_secret_*
+*ServiceAccount*.json
+deamon/tok*.json
+lib/*
+bin/*
+*.mp3
+*.wav
