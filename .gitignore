@@ -16,3 +16,5 @@ lib/*
 bin/*
 *.mp3
 *.wav
+token.json
+
