@@ -67,14 +67,28 @@ class LEDCtrl:
             "Could not change state of LED because no PIN was configured"
         )
 
-    def blink(self, endHigh: bool = True) -> List[Packet]:
+    def blink(self, endHigh: bool = True, forever: bool = False) -> List[Packet]:
+        if self.ledboard == PwmBoard.NONE_:
+            return
+        p = self.pin
+        if self.ledboard == PwmBoard.I2CBLED:
+            p = 20 + self.pin
+        if self.ledboard == PwmBoard.I2CCLED:
+            p = 40 + self.pin
+        if forever:
+            e = HWEvent.BLINKFOREVER
+        else:
+            e = HWEvent.BLINK3ENDHIGH if endHigh else HWEvent.BLINK3ENDLOW
+            if e == HWEvent.BLINK3ENDHIGH:
+                self.set_led_state(800)
+        return [Packet(e, p, 2)]
+
+    def blink_stop(self) -> None:
         if self.ledboard == PwmBoard.NONE_:
             return
         p = 20 + self.pin if self.ledboard == PwmBoard.I2CBLED else 40 + self.pin
-        e = HWEvent.BLINK3ENDHIGH if endHigh else HWEvent.BLINK3ENDLOW
-        if e == HWEvent.BLINK3ENDHIGH:
-            self.set_led_state(800)
-        return [Packet(e, p, 2)]
+        self.set_led_state(0)
+        return [Packet(HWEvent.BLINKFOREVER, p, 0)]
 
     @staticmethod
     def clamp(val: int, minval: int, maxval: int) -> int:
@@ -287,22 +301,18 @@ class HwCtrls:
                 return r
         return None
 
+    def _get_all_leds(self) -> list:
+        leds = []
+        for ctrl in self.ctrls:
+            leds.extend(ctrl.leds)
+            for child in ctrl.slaves:
+                leds.extend(child.leds)
+        return leds
+
     def reset(self):
         """Reset all controls to their initial state"""
         self.ctrls.clear()
         self.__load_ctrls()
-
-    def dim_lights(self, intensity: int = 100) -> List[Packet]:
-        """Dim all LEDs (both ctrls and indicators) to supplied intensity
-        This will not affect Backlight
-
-        Args:
-            intensity (int, optional): 0-100. Defaults to 100.
-
-        Returns:
-            List[Packet]: List of command packages
-        """
-        pass
 
     @staticmethod
     def __set_all_leds(pctrl: Hwctrl, state: bool, section=None) -> List[Packet]:
@@ -536,7 +546,7 @@ class HwCtrls:
         aux_flip2btn.leds.append(
             LEDCtrl(ledboard=PwmBoard.I2CCLED, pin=9, on_value=DEFAULT_PWM)
         )
-        aux_flip2btn.add_slave(Hwctrl(pin=44, section="relay", follow_parent=True))
+        # aux_flip2btn.add_slave(Hwctrl(pin=44, section="relay", follow_parent=True))
         aux_flip2.add_slave(aux_flip2btn)
 
         # #########################################
@@ -545,12 +555,27 @@ class HwCtrls:
         )
 
     def _list_waveformcollider_controls(self):
-        for i in range(0, 8):  # including 0, not including 8
-            wf_effbtn = Hwctrl(pin=i + 17, section="waveform", name=f"effectbtn{i+7}")
-            wf_effbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i + 4, on_value=DEFAULT_PWM)
-            )
-            self.ctrls.append(wf_effbtn)
+        e17 = Hwctrl(pin=17, section="waveform", name="effectbtn17")
+        e17.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=10, on_value=DEFAULT_PWM)
+        )
+        e18 = Hwctrl(pin=18, section="waveform", name="effectbtn18")
+        e18.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=6, on_value=DEFAULT_PWM))
+        e19 = Hwctrl(pin=19, section="waveform", name="effectbtn19")
+        e19.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=11, on_value=DEFAULT_PWM)
+        )
+        e22 = Hwctrl(pin=22, section="waveform", name="effectbtn22")
+        e22.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=4, on_value=DEFAULT_PWM))
+        e23 = Hwctrl(pin=23, section="waveform", name="effectbtn23")
+        e23.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=9, on_value=DEFAULT_PWM))
+        e24 = Hwctrl(pin=24, section="waveform", name="effectbtn24")
+        e24.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=5, on_value=DEFAULT_PWM))
+        e25 = Hwctrl(pin=25, section="waveform", name="effectbtn25")
+        e25.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=8, on_value=DEFAULT_PWM))
+        e26 = Hwctrl(pin=26, section="waveform", name="effectbtn26")
+        e26.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=7, on_value=DEFAULT_PWM))
+        self.ctrls.extend([e17, e18, e19, e22, e23, e24, e25, e26])
 
         wf_speaker = Hwctrl(pin=NO_PIN, section="waveform", name="speaker")
         wf_speaker.leds.append(
@@ -595,28 +620,50 @@ class HwCtrls:
         self.ctrls.extend([wf_speaker, wf_volumectrl, wf_rec])
 
     def _list_subspacesat_controls(self):
-        for i in range(0, 6):  # including 0, not including 6
-            sscflip = Hwctrl(pin=NO_PIN, section="subspace", name=f"sscflip{i+1}")
-            sscflip.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 10, on_value=DEFAULT_PWM)
-            )
-
-            sscbtn = Hwctrl(pin=i + 2, section="subspace", name=f"sccbtn{i+1}")
-            sscbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i, on_value=DEFAULT_PWM)
-            )
-            self.ctrls.extend([sscflip, sscbtn])
-        for i in range(0, 4):  # including 0, not including 4
-            sscflip = Hwctrl(pin=NO_PIN, section="subspace", name=f"sscflip{i+7}")
-            sscflip.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=i, on_value=DEFAULT_PWM)
-            )
-
-            sscbtn = Hwctrl(pin=i + 8, section="subspace", name=f"sccbtn{i+7}")
-            sscbtn.leds.append(
-                LEDCtrl(ledboard=PwmBoard.I2CALED, pin=i + 6, on_value=DEFAULT_PWM)
-            )
-            self.ctrls.extend([sscflip, sscbtn])
+        f1 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip1")
+        f1.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=10, on_value=DEFAULT_PWM))
+        f1b = Hwctrl(pin=2, section="subspace", name="sccbtn1")
+        f1b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=9, on_value=DEFAULT_PWM))
+        f2 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip2")
+        f2.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=11, on_value=DEFAULT_PWM))
+        f2b = Hwctrl(pin=3, section="subspace", name="sccbtn2")
+        f2b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=8, on_value=DEFAULT_PWM))
+        f3 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip3")
+        f3.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=12, on_value=DEFAULT_PWM))
+        f3b = Hwctrl(pin=4, section="subspace", name="sccbtn3")
+        f3b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=5, on_value=DEFAULT_PWM))
+        f4 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip4")
+        f4.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=13, on_value=DEFAULT_PWM))
+        f4b = Hwctrl(pin=5, section="subspace", name="sccbtn4")
+        f4b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=6, on_value=DEFAULT_PWM))
+        f5 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip5")
+        f5.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=14, on_value=DEFAULT_PWM))
+        f5b = Hwctrl(pin=6, section="subspace", name="sccbtn5")
+        f5b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=4, on_value=DEFAULT_PWM))
+        f6 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip6")
+        f6.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=15, on_value=DEFAULT_PWM))
+        f6b = Hwctrl(pin=7, section="subspace", name="sccbtn6")
+        f6b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=3, on_value=DEFAULT_PWM))
+        f7 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip7")
+        f7.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=0, on_value=DEFAULT_PWM))
+        f7b = Hwctrl(pin=8, section="subspace", name="sccbtn7")
+        f7b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=2, on_value=DEFAULT_PWM))
+        f8 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip8")
+        f8.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=1, on_value=DEFAULT_PWM))
+        f8b = Hwctrl(pin=9, section="subspace", name="sccbtn8")
+        f8b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=7, on_value=DEFAULT_PWM))
+        f9 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip9")
+        f9.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=2, on_value=DEFAULT_PWM))
+        f9b = Hwctrl(pin=10, section="subspace", name="sccbtn9")
+        f9b.leds.append(LEDCtrl(ledboard=PwmBoard.I2CALED, pin=0, on_value=DEFAULT_PWM))
+        f10 = Hwctrl(pin=NO_PIN, section="subspace", name="sscflip10")
+        f10.leds.append(LEDCtrl(ledboard=PwmBoard.I2CBLED, pin=3, on_value=DEFAULT_PWM))
+        f10b = Hwctrl(pin=11, section="subspace", name="sccbtn10")
+        f10b.leds.append(
+            LEDCtrl(ledboard=PwmBoard.I2CALED, pin=1, on_value=DEFAULT_PWM)
+        )
+        self.ctrls.extend([f1, f1b, f2, f2b, f3, f3b, f4, f4b, f5, f5b])
+        self.ctrls.extend([f6, f6b, f7, f7b, f8, f8b, f9, f9b, f10, f10b])
 
     def _list_master_controls(self):
         self.ctrls.append(Hwctrl(pin=12, name="masterSw", section="master"))

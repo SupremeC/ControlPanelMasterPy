@@ -18,3 +18,4 @@ bin/*
 *.wav
 token.json
 
+~.bashrc

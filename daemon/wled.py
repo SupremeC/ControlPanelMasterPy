@@ -4,10 +4,11 @@ import logging
 import queue
 import random
 import threading
+import numpy as np
 import serial
 import json
 import time
-from typing import Dict, Any, NamedTuple, Optional
+from typing import Callable, Dict, Any, NamedTuple, Optional
 from typing import List
 
 
@@ -76,12 +77,14 @@ class WLED:
         """
         self.command_queue = queue.Queue(maxsize=10)
         self.lock = threading.Lock()
+        self.sunrise_thread = None
         self.sending_thread = threading.Thread(
             target=self._send_cmd_from_queue, daemon=True
         )
         self.sending_thread.start()  # Start the sending thread
         self._uart_port = uart_port
         self._baud_rate = baud_rate
+        self._accept_commands: bool = True
         self._ser_timeout = 2
         self._ser = serial.Serial(
             self._uart_port, self._baud_rate, timeout=self._ser_timeout
@@ -93,7 +96,7 @@ class WLED:
                 self._ser.open()
                 time.sleep(0.1)
                 if self._ser.is_open():
-                    logger.info(f"Established connection on {self._uart_port}.")
+                    logger.info(f"Established WLED connection on {self._uart_port}.")
                 else:
                     logger.info("Failed to establish connection")
         except serial.SerialException as e:
@@ -118,18 +121,19 @@ class WLED:
         """Set on/off state for a specific segment, or ALL
         segments if no segmentID is passed in"""
         if segment is not None:
-            data_to_send = {"seg": [{"id": segment, "on": on}]}
+            data_to_send = {"bri": 255, "seg": [{"id": segment, "on": on}]}
             self._enqueue_command(data_to_send)
+            return
         status = self.read_state()
         for seg in status.seg_state:
-            data_to_send = {"seg": [{"id": seg.seg_id, "on": on}]}
+            data_to_send = {"bri": 255, "seg": [{"id": seg.seg_id, "on": on}]}
             self._enqueue_command(data_to_send)
 
     def toggle_wled_state(self, segment: Optional[int] = None) -> None:
         if segment is None:
-            data_to_send = {"on": "t"}
+            data_to_send = {"on": "t", "bri": 255}
         else:
-            data_to_send = {"seg": [{"id": segment, "on": "t"}]}
+            data_to_send = {"bri": 255, "seg": [{"id": segment, "on": "t"}]}
         self._enqueue_command(data_to_send)
 
     def read_state(self) -> WledStateSnapshot:
@@ -153,6 +157,93 @@ class WLED:
             )
 
         return WledStateSnapshot(wled_state, seg_count, segs)
+
+    def do_sunrise(
+        self, dur_sec: int = 20 * 60, p_callback: Callable[[], None] = None
+    ) -> None:
+        """
+        Gradually increasing intensity while fading color from red to yellow.
+        This function returns immediately,as the sunrise effect is performed in a
+        child thread.
+
+        :param dur_sec: Duration of the Sunrise effect in seconds
+        :type dur_sec: int
+        :param p_callback: Function to be called once the effect is complete
+        :type p_callback: Callable[[], None]
+        """
+        if self.sunrise_thread is not None and self.sunrise_thread.is_alive():
+            return
+        self.sunrise_thread = threading.Thread(
+            target=self._do_sunrise, kwargs=dict(dur_sec=dur_sec, p_callback=p_callback)
+        )
+        self.sunrise_thread.start()  # Start the sending thread
+
+    def _do_sunrise(self, dur_sec: int, p_callback: Callable[[], None] = None) -> None:
+        # User is not allowed to use WLED until Sunrise effect is complete
+        self._accept_commands = False
+
+        start_bri = 5
+        start_color = [255, 34, 3, 1]  # dark red
+        end_bri = 200
+        end_color = [250, 196, 3, 64]  # light yellow
+        steps = 600
+
+        # Turn down brightness before we begin doing sunrise
+        data_to_send = {
+            "on": True,
+            "seg": [
+                {"id": 0, "on": True, "fx": 0, "bri": 1, "col": [start_color]},
+                {"id": 1, "on": True, "fx": 0, "bri": 1, "col": [start_color]},
+            ],
+        }
+        self._enqueue_command(data_to_send, True)
+
+        steps_s = dur_sec / steps
+        for i in range(steps):
+            color = WLED.color_transform(start_color, end_color, i / steps)
+            color = [int(item) for item in color]
+            bri = ((end_bri - start_bri) / steps) * i
+            data_to_send = {
+                "on": True,
+                "bri": 255,
+                "seg": [
+                    {
+                        "id": 0,
+                        "on": True,
+                        "fx": 0,
+                        "bri": int(bri),
+                        "col": [color],
+                    },
+                    {
+                        "id": 1,
+                        "on": True,
+                        "fx": 0,
+                        "bri": int(bri),
+                        "col": [color],
+                    },
+                ],
+            }
+            self._enqueue_command(data_to_send, True)
+            time.sleep(steps_s)
+        self._accept_commands = True
+        if p_callback is not None:
+            p_callback()
+
+    @staticmethod
+    def color_transform(fromcolor, tocolor, percent: float):
+        """Transforms a color to target color
+
+        :param fromcolor:  color is rgbw between (0, 0, 0, 0)
+        :param tocolor:  color is rgbw between (0, 0, 0, 0)
+        :param percent: from 0.0 to 1.0
+        :type percent: float
+        :return: transformed color
+        :rtype: NDArray[floating[Any]]"""
+        percent = max(0, min(percent, 1))
+        fromcolor = np.array(fromcolor)
+        tocolor = np.array(tocolor)
+        vector = tocolor - fromcolor
+        return fromcolor + vector * percent
 
     def set_color(self, color: List[int], segment: int) -> None:
         # fx = 0 (Turn off effect)
@@ -192,8 +283,10 @@ class WLED:
         }
         self._enqueue_command(data_to_send)
 
-    def _enqueue_command(self, command: dict):
+    def _enqueue_command(self, command: dict, lock_override: bool = False) -> None:
         """Thread-safe function to add commands to the queue."""
+        if not self._accept_commands and not lock_override:
+            return
         with self.lock:
             if self.command_queue.full():
                 # Discard the oldest command (first in queue)
@@ -222,8 +315,8 @@ class WLED:
             current_time = time.time()  # Get the current time
             elapsed_time = current_time - start_time  # Calculate elapsed time
             received_data = self._read_message()
+
             if elapsed_time > 1.5 or received_data:
-                # Handle received data
                 break
         return received_data
 
@@ -267,6 +360,7 @@ if __name__ == "__main__":
         print("5: Next effect")
         print("6: Set solid color = Rnd")
         print("7: Rnd brightness")
+        print("77: Sunrise")
         print("8: Toggle segment 1 ON/OFF state")
         print("9: Exit()")
         choice = input("prompt")
@@ -300,6 +394,8 @@ if __name__ == "__main__":
             )
         elif choice == "7":
             wled_instance.set_brightness(random.randint(0, 255), 1)
+        elif choice == "77":
+            wled_instance._do_sunrise(66)
         if choice == "8":
             wled_instance.toggle_wled_state(segment=1)
         elif choice == "9":

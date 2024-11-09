@@ -3,23 +3,28 @@
 import datetime
 import logging
 from queue import Empty, Full, Queue
+import random
+import threading
 import time
 from typing import List
 from Pyro5.api import expose
 from .wled import WLED  # WledStateSnapshot, SegmentState
-from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent
+from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
 from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet, BlinkTarget  # noqa
-from .packet_serial import PacketSerial
-from openaiWrapper import OpenAiWrapper
-from gCalender import Calender
+from daemon.packet_serial import PacketSerial
+from daemon.openaiWrapper import OpenAiWrapper
+from daemon.gCalender import Calender
 
 logger = logging.getLogger("daemon.ctrlPanel")
-# The buffer of Arduino is increased to 256 bytes (if it works)
+# The serial buffer of Arduino is increased to 256 bytes (if it works)
 # it was changed in platformio config file in VSCode
-# 256 / 7bytes => 36 packets until buffer is full
-MAX_PACKETS_IN_SEND_QUEUE = 70
+# COBS adds an additional stop byte as well as '0' escaping, so lets assume each packet is 10 bytes.
+# 256 / 10bytes => 25 packets until buffer is full.
+# average arduino loop duration is ~25ms. In theory, that allows us
+# to send (1000/25ms)*25packets = 1000 packets per second.
+MAX_PACKETS_IN_SEND_QUEUE = 100
 SEND_HELLO_INTERVALL = 120  # seconds
 
 
@@ -27,6 +32,7 @@ class ControlPanel:
     """Master class (besides controlPanelDaemon of course)"""
 
     pyrodaemon: PyroDaemon
+    demo_on: bool = False
 
     def __init__(self):
         self._last_sent_hello: datetime.datetime = None
@@ -37,9 +43,11 @@ class ControlPanel:
         self._pserial: PacketSerial = PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue
         )
-        self.cal = Calender()
+        self.demo_on: bool = False
+        self.alarm_on: bool = False
+        self.cal = Calender(self.on_cal_alarm, self.on_cal_sunrise)
         self.ai = OpenAiWrapper()
-        self._audioctrl: AudioCtrl = AudioCtrl()
+        self._audioctrl: AudioCtrl = AudioCtrl(self.speakerLeds)
         self.wled_instance = WLED()
         logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
         logger.info(self.wled_instance)
@@ -64,6 +72,7 @@ class ControlPanel:
         """Closes serial connection and does general cleanup"""
         try:
             logger.info("ControlPanel stopping...")
+            self.demo_on = False
             self.reset()
             self._pserial.close_connection()
             self.pyrodaemon.stop()
@@ -140,40 +149,124 @@ class ControlPanel:
 
             self.send_packets(p_tosend)
             p_tosend.clear()
+
+            if self.demo_on and packet.target not in range(54, 63):  # analog ctrls
+                self.demo_on = False
+                return
+            if self.alarm_on and packet.target not in range(54, 63):  # analog ctrls
+                self.alarm_on = False
+                self._audioctrl.stop_alarm()
+                self.ai_talk
+                return
+
             if not mastersw.state or not inputsw.state:
                 return
 
             if packet.target >= 2 and packet.target <= 11 and packet.val == 1:
+                self.send_packets(
+                    self._ctrls.get_slavectrl(packet.target).leds[0].blink()
+                )
                 self._audioctrl.recsaved_play(packet.target)
             if packet.target >= 2 and packet.target <= 11 and packet.val == 100:
-                self._audioctrl.restore_original_audio(packet.target)
-            if packet.target >= 17 and packet.target <= 26:  # pin 20,21exclud
-                self._audioctrl.apply_effect(packet, self)
+                self._audioctrl.save_rec_to_hwswitch(packet.target)
+                self.send_packets(
+                    self._ctrls.get_slavectrl(packet.target).leds[0].blink(True)
+                )
+                self._audioctrl.sysaudio_play(aevent.REC_SAVED)
+                return
+            if packet.target >= 2 and packet.target <= 11 and packet.val == 200:
+                # Restore Audio OR Demo
+                if packet.target == 5:
+                    self.demo_on = not self.demo_on
+                    if self.demo_on:
+                        self._audioctrl.sysaudio_play(aevent.DEMOMODE)
+                        demo_thread = threading.Thread(
+                            target=self.wrapped_demo_run,
+                            kwargs=None,
+                        )
+                        demo_thread.start()
+                else:
+                    self._audioctrl.restore_original_audio(packet.target)
+                return
+            if packet.target in [17, 18, 19, 22, 23, 24, 25, 26]:  # Effect btns
+                if self._audioctrl.current_filepath is None:
+                    self._audioctrl.sysaudio_play(aevent.FAILED)
+                else:
+                    self.apply_soundeffect(packet)
+                    self.send_packets(
+                        Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.AUDIO_PRESETBTNS, 2)
+                    )
+                return
             if packet.target == 27 and packet.val:
-                self._audioctrl.sysaudio_play(aevent.REC_STARTED)
+                self._audioctrl.sysaudio_play(aevent.REC_STARTED, True)
                 self._audioctrl.start_recording()
+                return
             if packet.target == 27 and packet.val == 0:
-                self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
                 self._audioctrl.stop_recording()
+                self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
+                ai_ctrl = self._ctrls.get_slavectrl(69)
+                self.send_packets(ai_ctrl.leds[0].blink(True))
+                self.send_packets(
+                    Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.EFFECT_BTNS, 2)
+                )
+                self.send_packets(
+                    Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.AUDIO_PRESETBTNS, 2)
+                )
+                self._audioctrl._play_tmp_rec()
+                return
             if packet.target >= 66 and packet.target <= 69:
                 self._set_relays(packet, is_safetyctrl=False)
+                return
             if packet.target >= 32 and packet.target <= 37:
                 self.ledstrip_control(packet)
+                return
             if packet.target >= 38 and packet.target <= 41:
                 self._set_relays(packet, is_safetyctrl=True)
+                return
             if packet.target >= 52 and packet.target <= 59:  # ledtrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
+                return
             if packet.target == 62:
                 self.audio_volume(
                     self.map_value(val=packet.val, out_min=0, out_max=100)
                 )
+                return
         except Exception:
             logger.error(packet)
             logger.exception("exception in function switch_status_changed()")
+            self._audioctrl.sysaudio_play(aevent.FAILED)
         finally:
             if not no_action:
                 self.send_packets(p_tosend)
+
+    def apply_soundeffect(self, packet: Packet):
+        btn = self._ctrls.get_ctrl(packet.target)
+        match packet.target:
+            case 17:
+                self._audioctrl.apply_effect(EffectType.BITCRUSH, None)
+            case 18:
+                self._audioctrl.apply_effect(EffectType.PHASER, None)
+            case 19:
+                self._audioctrl.apply_effect(EffectType.REVERSE, None)
+            case 22:
+                self._audioctrl.apply_effect(EffectType.TIMESTRETCH, None)
+            case 23:
+                self._audioctrl.apply_effect(EffectType.PITCHLOWER, None)
+            case 24:
+                self._audioctrl.apply_effect(EffectType.PITCHHIGHER, None)
+            case 25:
+                self._audioctrl.apply_effect(EffectType.TIMECOMPRESS, None)
+            case 26:
+                self._audioctrl.apply_effect(EffectType.REVERB, None)
+        self.send_packets(btn.leds[0].blink())
+
+    def wrapped_demo_run(self) -> None:
+        self._led_ctrls = self._ctrls._get_all_leds()
+        while self.demo_on:
+            rnd_item = random.choice(self._led_ctrls)
+            self.send_packets(rnd_item.set_led_state(not rnd_item.state))
+            time.sleep(0.1)
 
     def cp_bg_lights(self, packet: Packet) -> None:
         """background light ON/OFF"""
@@ -212,7 +305,7 @@ class ControlPanel:
                     self.send_packets(flipsw.slaves[0].leds[0].blink(True))
                     pass
                 else:
-                    if packet.target == 38:
+                    if packet.target == 38:  # Bed lamp
                         self.send_packets(flipsw.slaves[0].set_state(True))
                         time.sleep(0.1)
                         self.send_packets(flipsw.slaves[0].set_state(False))
@@ -224,15 +317,63 @@ class ControlPanel:
             else:
                 btn = self._ctrls.get_slavectrl(packet.target)
                 if btn.parent.state:
-                    self._audioctrl.sysaudio_play(aevent.BTN_CLICKED)
-                    new_state = packet.val if packet.target == 67 else not btn.state
-                    self.send_packets(btn.set_state(new_state))
+                    if btn.pin == 69 and self._audioctrl.current_filepath is None:
+                        self.ai_talk(btn, False)
+                    elif btn.pin == 69 and self._audioctrl.current_filepath is not None:
+                        self.ai_talk(btn, True)
+                    else:
+                        self._audioctrl.sysaudio_play(aevent.BTN_CLICKED)
+                        new_state = packet.val if packet.target == 67 else not btn.state
+                        self.send_packets(btn.set_state(new_state))
 
         except Full:
             logger.exception("Sendqueue was full. Packet(s) could not be sent")
+            self._audioctrl.sysaudio_play(aevent.FAILED)
         except CtrlNotFoundException:
             logger.exception("Ctrl not found")
             raise
+
+    def ai_talk(self, p_btn, p_audio_call: bool) -> None:
+        ai_thread = threading.Thread(
+            target=self.wrapped_ai_talk,
+            kwargs=dict(btn=p_btn, audio_call=p_audio_call),
+        )
+        ai_thread.start()
+
+    def wrapped_ai_talk(self, btn, audio_call: bool) -> None:
+        try:
+            if audio_call:
+                self.send_packets(btn.leds[0].blink(forever=True))
+                audio_str = self._audioctrl._read_wav_file(
+                    self._audioctrl.current_filepath
+                )
+                self.ai._send_audio_chat(audio_str)
+                self._audioctrl.play_bytes(self.ai.audio)
+                self.send_packets(btn.leds[0].blink_stop())
+            else:
+                self.send_packets(btn.leds[0].blink(forever=True))
+                self.ai.upcomingEvents(self.cal.get_todays_events())
+                self._audioctrl.play_bytes(self.ai.audio)
+                self.send_packets(btn.leds[0].blink_stop())
+        except Exception as e:
+            self.sysaudio_play(aevent.FAILED)
+            logger.error(e)
+
+    def speakerLeds(self, on: bool) -> None:
+        if on:
+            self.send_packets(Packet(HWEvent.BLINKFOREVER, BlinkTarget.SPEAKER_LEDS, 1))
+        else:
+            self.send_packets(Packet(HWEvent.BLINKFOREVER, BlinkTarget.SPEAKER_LEDS, 0))
+
+    def on_cal_alarm(self) -> None:
+        self.alarm_on = True
+        self._audioctrl.sysaudio_play(aevent.ALARM, False, 20)
+        # sleep 5
+        # Play ai morning greeting?
+        pass
+
+    def on_cal_sunrise(self, duration: int) -> None:
+        self.wled_instance.do_sunrise(duration * 60)
 
     def ledstrip_control(self, packet: Packet):
         """Sends commands (translated from packet) to LED-strip"""
@@ -244,9 +385,11 @@ class ControlPanel:
             segment_state = (
                 self.wled_instance.read_state().seg_state[segmentId].seg_state
             )
-            red_ctrl = self._ctrls.get_ctrl(packet.target)
-            self.send_packets(red_ctrl.set_state(not segment_state))
+            led_ctrl = self._ctrls.get_ctrl(packet.target)
+            self.send_packets(led_ctrl.set_state(not segment_state))
+            # self.send_packets(led_ctrl.set_state(True))
             self.wled_instance.toggle_wled_state(segmentId)
+
         if packet.target == 36:
             self.wled_instance.previous_effect(1)
         if packet.target == 37:
@@ -270,13 +413,16 @@ class ControlPanel:
     def send_packets(
         self, packets: List, block: bool = False, timeout: float = None
     ) -> None:
-        """Puts the packet into sendQueue.
+        """Puts the packet(s) into sendQueue.
         It will be picked up ASAP by packetSerial thread"""
+        if not hasattr(packets, "__iter__"):
+            packets = [packets]
         try:
             for p in packets:
                 self._packet_sendqueue.put(p, block, timeout)
         except Full:
             logger.error("SendQueue was full. Packet(s) could not be sent")
+            self._audioctrl.sysaudio_play(aevent.FAILED)
 
     def time_to_send_hello(self) -> bool:
         """Is it time to send hello yet?"""
@@ -303,6 +449,7 @@ class ControlPanel:
             )
         except (Full, TimeoutError) as err:
             logger.error(err)
+            self._audioctrl.sysaudio_play(aevent.FAILED)
         else:
             logger.debug("reset done")
 

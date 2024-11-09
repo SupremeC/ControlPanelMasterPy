@@ -8,6 +8,7 @@ Blocking the file-writing thread for some time is no problem, as long as the
 recording can be stopped successfully when it is supposed to.
 
 """
+
 import datetime
 import os
 from pathlib import Path
@@ -17,7 +18,6 @@ import string
 import threading
 import logging
 import time
-import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
@@ -106,6 +106,7 @@ class AudioRec:
         """Returns a list of host APIs,
         whatever that is?!?! lol"""
         hosts = {}
+        i = 0
         for hostapi in sd.query_hostapis():
             print(str(i) + ": " + str(hostapi) + "\n")
             hosts[i] = str(hostapi)

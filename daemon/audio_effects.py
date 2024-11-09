@@ -9,7 +9,6 @@ from pedalboard import Plugin, Reverb, Compressor, Gain
 from pedalboard import Phaser, LadderFilter, Distortion, time_stretch
 from pedalboard.io import AudioFile
 import numpy as np
-from pydub import AudioSegment
 import pyrubberband as pyrb
 import soundfile as sf
 
@@ -84,12 +83,6 @@ class AudioEffect:
         y, sr = sf.read(infile)
         yw = pyrb.time_stretch(y, sr, stretch)
         sf.write(outfile, yw, sr, format="wav")
-        # ----- test pedalboard strectch
-        """Reverb effect"""
-        board = Pedalboard(
-            [Chorus(), Reverb(room_size=0.25), Gain(gain_db=10), time_stretch()]
-        )
-        self._apply_board(board, infile, outfile)
         return outfile
 
     def pitch(self, infile: str, outfile: str, pitch: float) -> str:

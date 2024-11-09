@@ -1,71 +1,98 @@
 import datetime
+import threading
 import time
 import logging
 import os.path
-from typing import List
+from typing import Callable, List
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from cevent import CEvent
+import pytz
+
+if __name__ == "__main__":
+    from cevent import CEvent
+else:
+    from daemon.cevent import CEvent
 
 
 logger = logging.getLogger("daemon.gCalender")
 
 
 class Calender:
-    def __init__(self):
+    def __init__(
+        self, p_callback_alarm: Callable[[], None], p_callback_sr: Callable[[int], None]
+    ):
         # If modifying these scopes, delete the file token.json.
         self.SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
         self.creds = None
         self.alarmName: str = "wakeUpAlarm"
-        self.time_to_update: datetime.datetime = None
+        self.time_to_update_utc: datetime.datetime = None
         self.events: List[CEvent] = []
         self.alarm: CEvent = None
+        self.on_alarm = p_callback_alarm
+        self.on_sunrise = p_callback_sr
+        self.cal_auto_update: bool = True
+        self.cal_updater_thread = threading.Thread(
+            target=self.__cal_update,
+            kwargs=dict(),
+        )
+        self.cal_updater_thread.start()
 
-    def update(self, force: bool = False) -> bool:
-        """Downloads todays calender events/alarm once per day at 05:00 aclock.
-        Call this function reguarly.
-        You can force a fresh download of events by passing force=True.
+    def stop(self) -> None:
+        """Stop Calender from updating itself"""
+        self.cal_auto_update = False
 
-        Parameters
-        ----------
-        force : [bool]
-            Force refresh of todays events from Google Calender
+    def upcoming_events_today(self) -> List[CEvent]:
+        if self.events is None:
+            return []
+        return [
+            obj
+            for obj in self.events
+            if obj.start
+            > (
+                datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(hours=1)
+            )
+        ]
 
-        Returns
-        -------
-        bool
-            Is it time to start the wakeUp alarm?
-        """
-        try:
-            current_time = datetime.datetime.now(datetime.timezone.utc)
-            if (
-                force
-                or self.time_to_update is None
-                or current_time >= self.time_to_update
-            ):
-                self.get_todays_events()
-                self.time_to_update = self._next_update()
+    def __cal_update(self) -> None:
+        """Downloads todays calender events/alarm"""
+        while self.cal_auto_update:
+            swedish_timezone = pytz.timezone("Europe/Stockholm")
+            try:
+                current_time = datetime.datetime.now(swedish_timezone)
+                current_time_utc = datetime.datetime.now(datetime.timezone.utc)
+                if (
+                    self.time_to_update_utc is None
+                    or current_time_utc >= self.time_to_update_utc
+                ):
+                    self.events = self.get_todays_events()
+                    self.time_to_update_utc = self._next_update_utc()
 
-            if self.alarm is None:
-                return False
-            if self.alarm.start is None:
-                self.alarm = None
-                return False
-            if current_time > self.alarm.start:
-                diff = current_time - self.alarm.start
-                self.alarm = None
-                if diff.total_seconds() < 60:
-                    return True
-        except Exception as e:
-            logger.error(e)
-        return False
+                if (
+                    self.alarm is not None
+                    and self.alarm.has_time
+                    and not self.alarm.reminder_done
+                ):
+                    if current_time > self.alarm.start - datetime.timedelta(
+                        minutes=self.alarm.reminder
+                    ):
+                        self.on_sunrise(self.alarm.reminder)
+                if self.alarm is not None and self.alarm.has_time:
+                    if current_time > self.alarm.start:
+                        self.alarm = None
+                        self.on_alarm()
+            except Exception as e:
+                logger.error(e)
+            time.sleep(60)
 
     def get_todays_events(self) -> List[CEvent]:
         self.refresh_tokens()
         try:
+            # Set the timezone to Stockholm, Sweden
+            swedish_timezone = pytz.timezone("Europe/Stockholm")
             service = build("calendar", "v3", credentials=self.creds)
 
             # Call the Calendar API
@@ -86,8 +113,8 @@ class Calender:
             events = events_result.get("items", [])
 
             if not events:
-                logger.info("No upcoming events found for today.")
-                return
+                logger.debug("No upcoming events found for today.")
+                return None
 
             self.alarm = None
             items = list()
@@ -115,10 +142,15 @@ class Calender:
                     location=loc,
                     is_alarm=alarm,
                     has_time=start[1],
+                    reminder_done=False,
                 )
                 if not e.is_alarm:
                     items.append(e)
-                if e.is_alarm:
+                if (
+                    e.is_alarm
+                    and e.has_time
+                    and datetime.datetime.now(swedish_timezone) < e.start
+                ):
                     self.alarm = e
             self.events = items
             print(f"downloaded {len(items)} calender events")
@@ -131,10 +163,14 @@ class Calender:
         # The file token.json stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        print("Current working directory:", os.getcwd())
+        # print("Current working directory:", os.getcwd())
+        folder = "daemon/"
+        if __name__ == "__main__":
+            folder = ""
+
         if os.path.exists("daemon/token.json"):
             self.creds = Credentials.from_authorized_user_file(
-                "daemon/token.json", self.SCOPES
+                folder + "token.json", self.SCOPES
             )
         # If there are no (valid) credentials available, let the user log in.
         if not self.creds or not self.creds.valid:
@@ -143,12 +179,13 @@ class Calender:
                 self.creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    "daemon/client_secret_776060522090-prfipc44cc0ef87rr78rg5773an22uan.apps.googleusercontent.com.json",
+                    folder
+                    + "/client_secret_776060522090-prfipc44cc0ef87rr78rg5773an22uan.apps.googleusercontent.com.json",
                     self.SCOPES,
                 )
                 self.creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open("token.json", "w") as token:
+            with open(folder + "token.json", "w") as token:
                 token.write(self.creds.to_json())
 
     def parse_event_date(date_as_str: str) -> tuple[datetime.datetime, bool]:
@@ -183,8 +220,11 @@ class Calender:
         end_of_today = start_of_tomorrow - datetime.timedelta(microseconds=1)
         return end_of_today.isoformat()
 
-    def _next_update(self) -> datetime.datetime:
-        """Returns datetime of the next time the hour is 05:00"""
+    def _next_update_utc(self, h: int = 2) -> datetime.datetime:
+        """Returns datetime of the next time to update"""
+        return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+            hours=h
+        )
         time_for_update = datetime.datetime.now(datetime.timezone.utc).replace(
             hour=5, minute=0, second=0, microsecond=0
         )
@@ -195,7 +235,7 @@ class Calender:
 
 
 if __name__ == "__main__":
-    cal = Calender()
+    cal = Calender(None, None)
     while True:
         do_alarm = cal.update()
         do_alarm = cal.update()
@@ -203,5 +243,4 @@ if __name__ == "__main__":
         events = cal.events
         print(f"Do_alarm: {do_alarm}")
         print(f"Events ({len(events)}): {events}")
-        time.sleep(4)
         break
