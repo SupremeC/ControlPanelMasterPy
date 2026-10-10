@@ -77,13 +77,14 @@ class WeatherService:
         """Keep-warm: fetches the forecast when it is no longer fresh, which
         also records the hourly temperatures. Never raises."""
         try:
-            self._current_forecast(self._clock(), self.location())
+            self._current_forecast(self.location())
         except Exception:
             logger.exception("Weather refresh failed")
 
     def report(self, now: datetime.datetime | None = None) -> WeatherReport | None:
         """The weather to tell at `now` (default: the clock), or None when
-        there is no usable forecast. Never raises."""
+        there is no usable forecast. Never raises. `now` only picks what to
+        describe: cache ages and the temperature history follow the clock."""
         try:
             return self._report(now or self._clock())
         except Exception:
@@ -92,7 +93,7 @@ class WeatherService:
 
     def _report(self, now: datetime.datetime) -> WeatherReport | None:
         lat, lon = self.location()
-        forecast = self._current_forecast(now, (lat, lon))
+        forecast = self._current_forecast((lat, lon))
         if forecast is None:
             return None
         days = []
@@ -105,7 +106,7 @@ class WeatherService:
             logger.warning("The forecast does not cover %s", now)
             return None
         start, end = days[0].parts[0].start, days[-1].parts[-1].end
-        warnings = relevant(self._current_warnings(now), lat, lon, start, end)
+        warnings = relevant(self._current_warnings(), lat, lon, start, end)
         return WeatherReport(
             days=tuple(days),
             warnings=tuple(warnings),
@@ -115,12 +116,17 @@ class WeatherService:
 
     # ---- forecast cache ---------------------------------------------------
 
-    def _current_forecast(
-        self, now: datetime.datetime, location: tuple[float, float]
-    ) -> Forecast | None:
+    def _age(self, since: datetime.datetime | None) -> datetime.timedelta | None:
+        """None when unknown or in the future (clock jump, bad state file):
+        such a forecast is neither fresh nor usable when SMHI fails."""
+        if since is None:
+            return None
+        age = self._clock() - since
+        return age if age >= datetime.timedelta(0) else None
+
+    def _current_forecast(self, location: tuple[float, float]) -> Forecast | None:
         self._load_state()
-        same_place = self._fetched_for == location
-        age = now - self._fetched if self._fetched and same_place else None
+        age = self._age(self._fetched) if self._fetched_for == location else None
         fresh = datetime.timedelta(minutes=self._cfg.weather_fresh_minutes)
         if self._forecast and age is not None and age < fresh:
             return self._forecast
@@ -136,23 +142,24 @@ class WeatherService:
                 return self._forecast
             logger.warning("%s. No weather", e)
             return None
+        now = self._clock()
         self._raw, self._forecast = raw, forecast
         self._fetched, self._fetched_for = now, location
         self._record_temps(forecast, now.date())
         self._save_state()
         return forecast
 
-    def _current_warnings(self, now: datetime.datetime) -> list[WeatherWarning]:
+    def _current_warnings(self) -> list[WeatherWarning]:
         """Warnings fetched at most weather_fresh_minutes ago; on failure
         the last ones up to weather_stale_hours old, else none."""
-        age = now - self._warnings_fetched if self._warnings_fetched else None
+        age = self._age(self._warnings_fetched)
         if age is not None and age < datetime.timedelta(
             minutes=self._cfg.weather_fresh_minutes
         ):
             return self._warnings
         try:
             self._warnings = parse_warnings(fetch_warnings_json(self._cfg.smhi_timeout))
-            self._warnings_fetched = now
+            self._warnings_fetched = self._clock()
         except SmhiError as e:
             if age is None or age >= datetime.timedelta(hours=self._cfg.weather_stale_hours):
                 self._warnings = []

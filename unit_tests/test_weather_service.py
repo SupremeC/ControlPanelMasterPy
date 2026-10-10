@@ -159,6 +159,42 @@ class TestCache(ServiceTestCase):
         self.assertIn("is not usable", logs.output[0])
         self.assertEqual(1, self.state()["version"])  # rewritten
 
+    def test_reportForAnotherTime_keepsTheRealFetchTime(self):
+        # arrange: describe tomorrow morning; the clock says 06:35 today
+        self.service.report(local("2026-10-13 06:35"))
+
+        # act
+        self.later(minutes=31)
+        self.service.report()
+
+        # assert: refetched after 30 min of real time, history by real date
+        self.assertEqual(2, self.fetch.call_count)
+        self.assertEqual("2026-10-12T07:06:00+02:00", self.state()["forecast"]["fetched"])
+        self.assertEqual(["2026-10-12", "2026-10-13"], sorted(self.state()["temps"]))
+
+    def test_fetchTimeInTheFuture_isNotFresh(self):
+        # arrange: a state file from a clock that was ahead
+        self.service.report()
+        state = self.state()
+        state["forecast"]["fetched"] = "2026-10-13T06:35:00+02:00"
+        self.cfg.weather_state_file.write_text(json.dumps(state))
+
+        # act
+        report = self.new_service().report()
+
+        # assert
+        self.assertIsNotNone(report)
+        self.assertEqual(2, self.fetch.call_count)
+
+    def test_fetchTimeInTheFuture_isNotUsedWhenSmhiFails(self):
+        self.service.report()
+        state = self.state()
+        state["forecast"]["fetched"] = "2026-10-13T06:35:00+02:00"
+        self.cfg.weather_state_file.write_text(json.dumps(state))
+        self.fetch.side_effect = SmhiError("503")
+        with self.assertLogs("daemon.weather", "WARNING"):
+            self.assertIsNone(self.new_service().report())
+
     def test_refresh_fetchesAndNeverRaises(self):
         self.service.refresh()
         self.assertTrue(self.cfg.weather_state_file.exists())
