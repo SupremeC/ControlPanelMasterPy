@@ -164,6 +164,16 @@ class TestAlarmChannel(AudioTestCase):
         self.audio.alarm_channel.set_volume.assert_called_once_with(1.0)
         self.audio.alarm_channel.fadeout.assert_called_once()
 
+    def test_waitUntilQuiet_returnsWhenMixerIsIdle(self):
+        # arrange
+        self.mixer.get_busy.side_effect = [True, True, False]
+
+        # act
+        self.audio.wait_until_quiet()
+
+        # assert
+        self.assertEqual(3, self.mixer.get_busy.call_count)
+
     def test_beforeStart_setLevelAndStopAreSafe(self):
         # arrange
         self.audio.alarm_channel = None

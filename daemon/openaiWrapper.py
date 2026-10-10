@@ -6,6 +6,7 @@ from openai import OpenAI
 from .cevent import CEvent
 from .smhi import SMHI
 from .config import Config
+from .personal import Personal, swedish_date
 
 
 logger = logging.getLogger("daemon.openaiWrapper")
@@ -13,6 +14,8 @@ logger = logging.getLogger("daemon.openaiWrapper")
 # gpt-4o-audio-preview was retired (404 model_not_found since Sep 2026).
 # gpt-audio-1.5 is OpenAI's named successor for the gpt-4o-audio / gpt-audio line.
 OPENAI_AUDIO_MODEL = "gpt-audio-1.5"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"  # reads a fixed text aloud (fallback)
+VOICE = "alloy"
 
 
 class OpenAiWrapper:
@@ -28,8 +31,13 @@ class OpenAiWrapper:
     audio: bytes | None
     """Raw audio data from last call."""
 
-    def __init__(self, key_path: Path = Config.openai_key_file):
+    def __init__(
+        self,
+        key_path: Path = Config.openai_key_file,
+        personal_path: Path = Config.personal_file,
+    ):
         self._key_path = key_path
+        self._personal_path = personal_path
         self._client: OpenAI | None = None
         self.audio: bytes = None
 
@@ -49,8 +57,9 @@ class OpenAiWrapper:
             object: Response object from OpenAI. Contains both text and audio data.
         """
         weather = SMHI.get_weather_descr()
-        arr = OpenAiWrapper.__build_morning_instr(weather, events)
-        return self._send_chat(arr)
+        message = self._send_chat(self._morning_instr(weather, events))
+        logger.info("Briefing: %s", message.audio.transcript)
+        return message
 
     def upcomingEvents(self, events: list[CEvent]) -> str:
         """Calls OpenAI with weather and calender events as input. Slightly
@@ -66,8 +75,7 @@ class OpenAiWrapper:
             object: Response object from OpenAI. Contains both text and audio data.
         """
         weather = SMHI.get_weather_descr()
-        arr = OpenAiWrapper.__build_events_instr(weather, events)
-        return self._send_chat(arr)
+        return self._send_chat(self._events_instr(weather, events))
 
     def _send_audio_chat(self, audio: str) -> str:
         """Sends a recorded question (base64 wav) and stores the spoken
@@ -76,8 +84,8 @@ class OpenAiWrapper:
         completion = self.client.chat.completions.create(
             model=OPENAI_AUDIO_MODEL,
             modalities=["text", "audio"],
-            audio={"voice": "alloy", "format": "mp3"},
-            messages=OpenAiWrapper.build_audio_instr(audio),
+            audio={"voice": VOICE, "format": "mp3"},
+            messages=self.build_audio_instr(audio),
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
         return completion.choices[0].message
@@ -88,7 +96,7 @@ class OpenAiWrapper:
         completion = self.client.chat.completions.create(
             model=OPENAI_AUDIO_MODEL,
             modalities=["text", "audio"],
-            audio={"voice": "alloy", "format": "mp3"},
+            audio={"voice": VOICE, "format": "mp3"},
             messages=convo_arr,
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
@@ -96,19 +104,67 @@ class OpenAiWrapper:
         return completion.choices[0].message
         # print(completion.choices[0].message)
 
-    @staticmethod
-    def build_audio_instr(wav_data: str) -> dict[str, str]:
+    def speak(self, text: str) -> bytes:
+        """Reads a fixed text aloud in Swedish (MP3), stores it in
+        self.audio and returns it. Blocking."""
+        self.audio = None
+        response = self.client.audio.speech.create(
+            model=OPENAI_TTS_MODEL,
+            voice=VOICE,
+            input=text,
+            instructions="Tala svenska, lugnt och vänligt.",
+            response_format="mp3",
+        )
+        self.audio = response.read()
+        return self.audio
+
+    def fallback_briefing(self, events: list[CEvent]) -> str:
+        """A short Swedish morning text made without the AI: greeting,
+        time and the first event of the day."""
         now = datetime.now()
-        dayOrdinal = OpenAiWrapper.ordinal(now.day)
-        today = now.strftime(f"%A, %B {dayOrdinal}")
-        timenow = now.strftime("%H:%M")
-        sys = {
-            "role": "system",
-            "content": """You are a positive helful assistant. Todays date is {dt}. Current time is {trn}.
-                 Answers should be short, tailored for an 11-year-old child named Axel""".format(
-                dt=today, trn=timenow
-            ),
-        }
+        name = self._personal().name
+        text = f"God morgon{' ' + name if name else ''}! Klockan är {now:%H:%M}."
+        timed = [e for e in events if e.has_time]
+        if timed:
+            first = min(timed, key=lambda e: e.start)
+            text += f" Idag börjar det med {first.summary} klockan {first.start:%H:%M}."
+        elif events:
+            text += f" Idag är det {events[0].summary}."
+        else:
+            text += " Jag hittar inget i kalendern idag."
+        return text
+
+    # ---- prompts ----------------------------------------------------------
+    # The request goes in the user message. A user message that only says
+    # "use your system instructions" makes gpt-audio-1.5 refuse (#16).
+
+    def _personal(self) -> Personal:
+        return Personal.load(self._personal_path)
+
+    def _system(self, extra: str = "") -> dict[str, str]:
+        now = datetime.now()
+        listener = self._personal().describe(now.date())
+        content = (
+            f"Du är en vänlig röstassistent. Du pratar med {listener} "
+            "som bor i Stockholm. Svara alltid på svenska, även om du får "
+            "en fråga på ett annat språk. Använd enkla ord och korta meningar. "
+            f"Idag är det {swedish_date(now.date())} och klockan är {now:%H:%M}."
+        )
+        return {"role": "system", "content": f"{content} {extra}".strip()}
+
+    @staticmethod
+    def _facts(weather: str, events: list[CEvent]) -> str:
+        lines = []
+        for e in events:
+            when = f"{e.start:%H:%M}" if e.has_time else "hela dagen"
+            where = f" ({e.location})" if e.location else ""
+            lines.append(f"- {when}: {e.summary}{where}")
+        facts = "Dagens händelser:\n" + ("\n".join(lines) or "- inga")
+        if weather:
+            facts = f"Väder (på engelska, översätt): {weather}\n{facts}"
+        return facts
+
+    def build_audio_instr(self, wav_data: str) -> list[dict]:
         audio = {
             "role": "user",
             "content": [
@@ -121,77 +177,35 @@ class OpenAiWrapper:
                 }
             ],
         }
-        return [sys, audio]
+        return [self._system("Svara kort."), audio]
 
-    def __build_events_instr(weather: str, events: list[str]) -> dict[str, str]:
-        now = datetime.now()
-        timenow = now.strftime("%H:%M")
-        OpenAiWrapper.ordinal(now.day)
-        syscontent = {
-            "role": "system",
-            "content": """Generate a positive and friendly greeting to Axel. Include the time which is {trn} right now,
-         current weather ({wea}), and upcoming events tailored for an 11-year-old child named Axel.
-        # Steps
-        1. Start with a friendly, positive, greeting to Axel.
-        2. Explain the current weather in Stockholm, Sweden.
-        4. Mention all upcoming events, if it is school:mention when it starts.
-        Use excitement and positivity in your tone.
-        5. Conclude with an encouraging message.
+    def _morning_instr(self, weather: str, events: list[CEvent]) -> list[dict]:
+        steps = [
+            "Säg god morgon till mig.",
+            "Säg vilken dag det är.",
+            "Berätta kort om vädret." if weather else None,
+            "Berätta om dagens händelser i tidsordning. "
+            "Är det skola: säg när den börjar.",
+            "Avsluta med något uppmuntrande.",
+        ]
+        numbered = [f"{i}. {t}" for i, t in enumerate(filter(None, steps), 1)]
+        request = (
+            "God morgon! Ge mig dagens morgonbesked. Högst fem korta meningar, "
+            "i den här ordningen:\n" + "\n".join(numbered) + "\n"
+            "Hitta inte på något som inte står nedan.\n\n"
+            + self._facts(weather, events)
+        )
+        return [self._system(), {"role": "user", "content": request}]
 
-        # Todays Events
-        {ev}
-
-        # Output Format
-
-        The response should be fairly short.
-        Include "..." Between paragraphs to indicate a pause.
-        """.format(
-                wea=weather, ev=events, trn=timenow
-            ),
-        }
-        usercontent = {
-            "role": "user",
-            "content": "Please answer using your system instructions. Thank you.",
-        }
-        return [syscontent, usercontent]
-
-    def __build_morning_instr(weather: str, events: list[str]) -> dict[str, str]:
-        now = datetime.now()
-        dayOrdinal = OpenAiWrapper.ordinal(now.day)
-        today = now.strftime(f"%A, %B {dayOrdinal}")
-        timenow = now.strftime("%H:%M")
-        OpenAiWrapper.ordinal(now.day)
-        syscontent = {
-            "role": "system",
-            "content": """Generate a positive and friendly description of: todays date ({dt}),
-         current weather ({wea}), and upcoming events tailored for an 11-year-old child named Axel.
-        # Steps
-        1. Start with a friendly, positive, good morning greeting to Axel.
-        2. Describe todays date with a fun fact or something interesting about the day.
-        3. Explain the current weather in Stockholm, Sweden.
-        4. Mention all upcoming events, if it is school: mention when it starts.
-        5. Conclude with an encouraging message or question to engage further.
-
-        the Time right now is {trn}
-        # Todays Events
-        {ev}
-
-        # Output Format
-        The response should be fairly short.
-        Include "..." Between paragraphs to indicate a pause.
-        """.format(
-                dt=today, wea=weather, ev=events, trn=timenow
-            ),
-        }
-        usercontent = {
-            "role": "user",
-            "content": "Please write me an answer using your system instructions.",
-        }
-        return [syscontent, usercontent]
-
-    def ordinal(n: int) -> str:
-        """derive the ordinal numeral for a given number n"""
-        return f"{n:d}{'tsnrhtdd'[(n//10%10!=1)*(n%10<4)*n%10::4]}"
+    def _events_instr(self, weather: str, events: list[CEvent]) -> list[dict]:
+        weather_part = "berätta kort om vädret och " if weather else ""
+        request = (
+            "Vad händer idag? Svara kort: säg vad klockan är, "
+            f"{weather_part}berätta om dagens händelser som inte har varit än, "
+            "i tidsordning. Hitta inte på något som inte står nedan.\n\n"
+            + self._facts(weather, events)
+        )
+        return [self._system(), {"role": "user", "content": request}]
 
 
 if __name__ == "__main__":

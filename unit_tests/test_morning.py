@@ -340,6 +340,38 @@ class TestAfterDismissal(MorningTestCase):
         self.assertEqual(State.BRIEFING, self.routine.state)
         self.assertTrue(any("briefing=pulled" in line for line in logs.output))
 
+    def test_aiButtonWhileRinging_dismissesAndPullsBriefing(self):
+        # arrange
+        self.routine.set_alarm(ALARM)
+        self.run_until("07:01")
+
+        # act
+        with self.assertLogs("daemon.morning", "INFO") as logs:
+            used = self.press(pin=69)
+
+        # assert
+        self.assertTrue(used)
+        self.assertEqual(State.BRIEFING, self.routine.state)
+        self.actions.alarm_stop.assert_called_once_with()
+        self.actions.chime.assert_called_once_with("off")
+        self.actions.briefing_play.assert_called_once_with()
+        self.assertTrue(any("briefing=pulled" in line for line in logs.output))
+
+    def test_aiButtonOnReRing_onlyDismisses(self):
+        # arrange: briefing already played, no second input
+        self.ring_and_dismiss()
+        self.run_until("07:06")
+        self.routine.briefing_finished()
+        self.run_until("07:11")
+        self.assertEqual(State.RINGING, self.routine.state)
+
+        # act
+        self.press(pin=69)
+
+        # assert
+        self.assertEqual(State.DONE, self.routine.state)
+        self.actions.briefing_play.assert_called_once_with()
+
     def test_volumeOverrideHeldUntilBriefingPlayed(self):
         # arrange
         self.ring_and_dismiss()

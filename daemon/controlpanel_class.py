@@ -17,7 +17,12 @@ from .config import Config
 from .events import CalendarAlarm, JobDone, MorningTest, PlaybackChanged
 from .workers import Workers
 from .wled import WLED  # WledStateSnapshot, SegmentState
-from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
+from daemon.audio_ctrl import (
+    ALARM_FADEOUT_MS,
+    AudioCtrl,
+    SysAudioEvent as aevent,
+    EffectType,
+)
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet, BlinkTarget  # noqa
 from daemon.packet_serial import PacketSerial
@@ -41,6 +46,10 @@ MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
 DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
 BRIEFING_RETRY_DELAY = 60  # seconds before a failed briefing is generated again
 MORNING_TEST_LEAD = 120  # seconds from SIGUSR1 to the test alarm
+# Silence between the alarm, the chimes and speech, so they do not melt
+# together. The "off" chime waits for the alarm's fade-out plus the gap.
+CHIME_GAP = 0.5  # seconds
+OFF_CHIME_DELAY = ALARM_FADEOUT_MS / 1000 + CHIME_GAP
 BED_LAMP_PULSE = 0.1  # seconds the bed lamp relay is pulsed
 EFFECT_BUTTONS = {
     17: EffectType.BITCRUSH,
@@ -103,7 +112,10 @@ class ControlPanel:
             update_interval=self._config.calendar_update_interval,
             config=self._config,
         )
-        self.ai = OpenAiWrapper(key_path=self._config.openai_key_file)
+        self.ai = OpenAiWrapper(
+            key_path=self._config.openai_key_file,
+            personal_path=self._config.personal_file,
+        )
         self._audioctrl: AudioCtrl = AudioCtrl(
             lambda playing: self._events.put(PlaybackChanged(playing))
         )
@@ -592,17 +604,12 @@ class ControlPanel:
         """Chime, then the briefing, on the AI lane. Tells the routine
         when it is over, whether it played or not."""
         routine = self.morning
-
-        def failed(_error: BaseException) -> None:
-            self._audioctrl.sysaudio_play(aevent.FAILED)
-            routine.briefing_finished()
-
         self._ai_job = self._run_job(
             self._ai_jobs,
             "briefing",
             self._play_briefing,
             on_done=lambda _result: routine.briefing_finished(),
-            on_error=failed,
+            on_error=lambda _error: routine.briefing_finished(),
         )
 
     def start_morning_test(self) -> None:
@@ -666,11 +673,31 @@ class ControlPanel:
         self._briefing_audio = self._generate_briefing()
 
     def _play_briefing(self) -> None:
+        """The prepared briefing, else one made now, else a fixed text
+        read aloud, else only the chime."""
         audio, self._briefing_audio = self._briefing_audio, None
         if audio is None:
-            audio = self._generate_briefing()
+            audio = self._briefing_or_fallback()
+        # The "off" chime may still be due (OFF_CHIME_DELAY) or playing.
+        time.sleep(OFF_CHIME_DELAY + 0.2)
+        self._audioctrl.wait_until_quiet()
+        time.sleep(CHIME_GAP)
         self._audioctrl.sysaudio_play(aevent.CHIME_SPEAK, block=True)
+        if audio is None:
+            return
+        time.sleep(CHIME_GAP)
         self._audioctrl.play_bytes(audio)
+
+    def _briefing_or_fallback(self) -> bytes | None:
+        try:
+            return self._generate_briefing()
+        except Exception:
+            logger.exception("Briefing failed. Reading the fallback text")
+        try:
+            return self.ai.speak(self.ai.fallback_briefing(self.cal.todays_events()))
+        except Exception:
+            logger.exception("Fallback briefing failed. Only the chime plays")
+        return None
 
     def speakerLeds(self, on: bool) -> None:
         if on:
@@ -827,7 +854,9 @@ class _MorningActions:
         self._cp._audioctrl.alarm_stop()
 
     def chime(self, kind: str) -> None:
-        self._cp._audioctrl.sysaudio_play({"off": aevent.CHIME_OFF}[kind])
+        # After the alarm has faded out, with a short silence.
+        event = {"off": aevent.CHIME_OFF}[kind]
+        self._cp.call_later(OFF_CHIME_DELAY, self._cp._audioctrl.sysaudio_play, event)
 
     def volume_override(self, on: bool) -> None:
         self._cp._audioctrl.volume_override(on, self._cp._morning_cfg.alarm_volume)

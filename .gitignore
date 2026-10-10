@@ -16,6 +16,7 @@ bin/*
 *.mp3
 *.wav
 token.json
+daemon/personal.json
 
 ~.bashrc
 

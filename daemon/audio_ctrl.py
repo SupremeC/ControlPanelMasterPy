@@ -250,6 +250,13 @@ class AudioCtrl:
         if self.alarm_channel is not None:
             self.alarm_channel.fadeout(ALARM_FADEOUT_MS)
 
+    def wait_until_quiet(self, timeout: float = 10) -> None:
+        """Blocking: waits until no mixer sound plays (ffplay speech does
+        not count), at most timeout seconds. Run it on a worker."""
+        deadline = time.monotonic() + timeout
+        while mixer.get_busy() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
     def alarm_playing(self) -> bool:
         return self.alarm_channel is not None and bool(self.alarm_channel.get_busy())
 

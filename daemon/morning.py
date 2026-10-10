@@ -17,7 +17,8 @@ in the middle resumes at the right point.
   because they drift. A strip switch hands the lights back (WAITING).
 - RINGING: any digital input dismisses. Not dismissed, it gets louder
   every cycle and gives up after `alarm_give_up_minutes`.
-- AWAKE: the briefing plays 5 min after dismissal, or on the AI button.
+- AWAKE: the briefing plays 5 min after dismissal, or on the AI button
+  (also when the AI button is what dismissed the alarm).
 - DONE: waits for a second input; without one the alarm rings again
   (at most `rering_max` times). Then IDLE until the next alarm.
 
@@ -156,6 +157,8 @@ class MorningRoutine:
         if state == State.RINGING:
             if digital:
                 self._dismiss()
+                if pin == AI_BUTTON and self.state == State.AWAKE:
+                    self._play_briefing("pulled")
                 return True
             return pin in STRIP_POTS
         if not digital or state not in (State.AWAKE, State.BRIEFING, State.DONE):

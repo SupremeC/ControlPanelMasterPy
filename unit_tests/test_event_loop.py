@@ -200,8 +200,23 @@ class TestMorningWiring(EventLoopTestCase):
         # assert: dismissed, the button's own sound is not played
         self.assertEqual(State.AWAKE, self.cp.morning.state)
         self.cp._audioctrl.alarm_stop.assert_called_once_with()
-        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.CHIME_OFF)
         self.cp._audioctrl.recsaved_play.assert_not_called()
+
+    def test_offChime_waitsForTheAlarmToFadeOut(self):
+        # arrange
+        self.ring()
+        started = time.monotonic()
+
+        # act
+        self.press(2)
+        played = self.process_until(
+            lambda: mock.call(aevent.CHIME_OFF)
+            in self.cp._audioctrl.sysaudio_play.call_args_list
+        )
+
+        # assert: alarm fade-out (0.5 s) plus a 0.5 s silence
+        self.assertTrue(played)
+        self.assertGreaterEqual(time.monotonic() - started, 0.95)
 
     def test_dismissWithMasterSwitch_keepsItsStateQuietly(self):
         # arrange
@@ -225,26 +240,68 @@ class TestMorningWiring(EventLoopTestCase):
         self.press(69)
 
         # assert
-        self.assertTrue(self.process_until(lambda: self.cp.morning.state == State.DONE))
+        self.assertTrue(
+            self.process_until(lambda: self.cp.morning.state == State.DONE, timeout=5)
+        )
         self.cp.ai.morningBreifing.assert_called_once()  # prepared, not again
         self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
         self.cp._audioctrl.volume_override.assert_called_with(False, 70)
 
-    def test_briefingFails_playsFailedAndRoutineGoesOn(self):
+    def test_aiButtonWhileRinging_dismissesAndPlaysBriefingAtOnce(self):
+        # arrange
+        self.ring()
+
+        # act
+        self.press(69)
+
+        # assert
+        self.assertEqual(State.BRIEFING, self.cp.morning.state)
+        self.cp._audioctrl.alarm_stop.assert_called_once_with()
+        self.assertTrue(
+            self.process_until(lambda: self.cp.morning.state == State.DONE, timeout=5)
+        )
+        self.cp._audioctrl.play_bytes.assert_called_once()
+
+    def test_briefingFails_readsFallbackText(self):
         # arrange
         self.cp.ai.morningBreifing.side_effect = RuntimeError("no network")
+        self.cp.ai.fallback_briefing.return_value = "God morgon!"
         with self.assertLogs("daemon.ctrlPanel", "ERROR"):
             self.ring()
             self.press(2)
 
             # act
             self.press(69)
-            done = self.process_until(lambda: self.cp.morning.state == State.DONE)
+            done = self.process_until(
+                lambda: self.cp.morning.state == State.DONE, timeout=5
+            )
 
         # assert
         self.assertTrue(done)
-        self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.FAILED)
+        self.cp.ai.speak.assert_called_once_with("God morgon!")
+        self.cp._audioctrl.play_bytes.assert_called_once_with(
+            self.cp.ai.speak.return_value
+        )
+
+    def test_everythingFails_onlyTheChimePlays(self):
+        # arrange
+        self.cp.ai.morningBreifing.side_effect = RuntimeError("no network")
+        self.cp.ai.speak.side_effect = RuntimeError("no network")
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.ring()
+            self.press(2)
+
+            # act
+            self.press(69)
+            done = self.process_until(
+                lambda: self.cp.morning.state == State.DONE, timeout=5
+            )
+
+        # assert
+        self.assertTrue(done)
+        self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
+        self.cp._audioctrl.play_bytes.assert_not_called()
 
     def test_cancelledSunrise_turnsBothStripsOff(self):
         # act

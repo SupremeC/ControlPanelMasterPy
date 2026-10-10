@@ -93,3 +93,6 @@ class Config:
     # Creating a new token.json needs a browser login with the
     # client_secret_*.json file next to it; the daemon only refreshes it.
     google_token_file: Path = DAEMON_DIR / "token.json"
+    # Name and birthday of the listener (personal.example.json shows the
+    # format). Gitignored: never commit it.
+    personal_file: Path = DAEMON_DIR / "personal.json"
