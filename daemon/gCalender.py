@@ -17,7 +17,8 @@ from daemon.config import Config
 logger = logging.getLogger("daemon.gCalender")
 
 TIMEZONE = pytz.timezone("Europe/Stockholm")
-MAX_EVENTS = 50  # per fetch; the window is today and tomorrow
+PAGE_SIZE = 250  # the API maximum
+MAX_PAGES = 10
 
 
 def _local_now() -> datetime.datetime:
@@ -190,28 +191,19 @@ class Calender:
         with self._fetch_lock:
             if not self.refresh_tokens():
                 return False
-            today = self._now().date()
+            window_start = _local_midnight(self._now().date())
+            window_end = window_start + datetime.timedelta(days=2)
+            window_end = _local_midnight(window_end.date())  # DST-safe
             try:
-                service = build("calendar", "v3", credentials=self.creds)
-                items = (
-                    service.events()
-                    .list(
-                        calendarId="primary",
-                        timeMin=_local_midnight(today).isoformat(),
-                        timeMax=_local_midnight(
-                            today + datetime.timedelta(days=2)
-                        ).isoformat(),
-                        maxResults=MAX_EVENTS,
-                        singleEvents=True,
-                        orderBy="startTime",
-                    )
-                    .execute()
-                    .get("items", [])
-                )
+                items = self._list_events(window_start, window_end)
             except HttpError as error:
                 logger.error("Fetching calendar events failed: %s", error)
                 return False
-            events = [e for e in map(self._parse_event, items) if e is not None]
+            events = [
+                e
+                for e in map(self._parse_event, items)
+                if e is not None and e.start >= window_start
+            ]
             self._events = [e for e in events if not e.is_alarm]
             self._alarms = sorted(e.start for e in events if e.is_alarm)
             logger.info(
@@ -220,6 +212,36 @@ class Calender:
                 [a.strftime("%a %H:%M") for a in self._alarms],
             )
             return True
+
+    def _list_events(
+        self, window_start: datetime.datetime, window_end: datetime.datetime
+    ) -> List[dict]:
+        """Every event that overlaps the window, all pages. Google filters
+        timeMin on the END time, so an event that started long ago but has
+        not ended (a long or wrongly set end time) is listed too, first."""
+        service = build("calendar", "v3", credentials=self.creds)
+        items: List[dict] = []
+        page_token = None
+        for _ in range(MAX_PAGES):
+            page = (
+                service.events()
+                .list(
+                    calendarId="primary",
+                    timeMin=window_start.isoformat(),
+                    timeMax=window_end.isoformat(),
+                    maxResults=PAGE_SIZE,
+                    singleEvents=True,
+                    orderBy="startTime",
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            items += page.get("items", [])
+            page_token = page.get("nextPageToken")
+            if page_token is None:
+                return items
+        logger.warning("Calendar has more than %d events; rest ignored", len(items))
+        return items
 
     def _parse_event(self, event: dict) -> CEvent | None:
         start, has_time = Calender.parse_event_date(event["start"].get("dateTime"))

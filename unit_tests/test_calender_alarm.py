@@ -131,6 +131,35 @@ class TestFetch(CalendarTestCase):
         # assert
         self.assertEqual(at("2026-10-10 17:00"), self.cal.todays_events()[0].start)
 
+    def test_eventsStartedBeforeToday_areIgnored(self):
+        # Google lists events that started long ago but have not ended,
+        # e.g. a recurring alarm whose end time is months after its start.
+        cal = self.fetched(
+            timed("wakeUpAlarm", "2026-01-26 06:45"),
+            timed("Holiday trip", "2026-10-09 10:00"),
+            timed("wakeUpAlarm", "2026-10-11 06:45"),
+        )
+
+        # assert
+        self.assertEqual([at("2026-10-11 06:45")], cal._alarms)
+        self.assertEqual([], cal.todays_events())
+
+    def test_readsAllPages(self):
+        # arrange: the real alarm only on the second page
+        pages = [
+            {"items": [timed("wakeUpAlarm", "2026-01-26 06:45")], "nextPageToken": "p2"},
+            {"items": [timed("wakeUpAlarm", "2026-10-11 06:45")]},
+        ]
+        self.list_call.return_value.execute.side_effect = pages
+
+        # act
+        self.assertTrue(self.cal.fetch())
+
+        # assert
+        self.assertEqual(at("2026-10-11 06:45"), self.cal.next_alarm())
+        tokens = [c.kwargs["pageToken"] for c in self.list_call.call_args_list]
+        self.assertEqual([None, "p2"], tokens)
+
     def test_httpError_keepsLastEvents(self):
         # arrange
         cal = self.fetched(timed("wakeUpAlarm", "2026-10-10 07:00"))
