@@ -146,26 +146,3 @@ class Packet:
         if self.error is not None and self.error != ErrorType.NONE_:
             r += f"  error={self.error.name}"
         return r
-
-    @staticmethod
-    def packet_class_to_dict(obj):
-        """Pyro: Serialization of Packet class"""
-        return {
-            "__class__": "pyro-custom-Packet",
-            "target-attr": obj.target,
-            "val-attr": obj.val,
-            "created-attr": obj.created.isoformat(),
-            "error-attr": obj.error,
-            "hw_event-attr": obj.hw_event,
-        }
-
-    @staticmethod
-    def packet_dict_to_class(_classname, d):
-        """Pyro: Deserialization of Packet class"""
-        o = Packet()
-        o.target = d["target-attr"]
-        o.val = d["val-attr"]
-        o.created = datetime.fromisoformat(d["created-attr"])
-        o.error = ErrorType(d["error-attr"])
-        o.hw_event = HWEvent(d["hw_event-attr"])
-        return o

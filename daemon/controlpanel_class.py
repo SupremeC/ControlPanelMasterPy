@@ -10,7 +10,6 @@ from typing import List
 
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
-from .pyro_daemon import PyroDaemon
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet, BlinkTarget  # noqa
 from daemon.packet_serial import PacketSerial
@@ -31,7 +30,6 @@ SEND_HELLO_INTERVALL = 120  # seconds
 class ControlPanel:
     """Master class (besides controlPanelDaemon of course)"""
 
-    pyrodaemon: PyroDaemon
     demo_on: bool = False
 
     def __init__(self):
@@ -58,14 +56,6 @@ class ControlPanel:
         try:
             self.reset()
             self._pserial.open_connection()
-            logger.info("StartingPyro daemon...")
-            self.pyrodaemon = PyroDaemon(self)
-            self.pyrodaemon.daemon = True
-            self.pyrodaemon.start()  # do not use 'Run()'
-            logger.debug("waiting for Pyro...")
-            self.pyrodaemon.started.wait()
-            self.pyrodaemon.write_uri_file()
-            logger.info("Pyro daemon started")
         except Exception as e:
             logger.error(e)
 
@@ -76,7 +66,6 @@ class ControlPanel:
             self.demo_on = False
             self.reset()
             self._pserial.close_connection()
-            self.pyrodaemon.stop()
             self.wled_instance.close_serial_conn()
             self.cal.stop()
         except Exception as e:

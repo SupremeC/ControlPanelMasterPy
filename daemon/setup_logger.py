@@ -25,5 +25,3 @@ file_handler.setFormatter(formatter)
 # logger.addHandler(file_handler)
 logger.addHandler(stdout_handler)
 
-logging.getLogger("Pyro5").setLevel(logging.DEBUG)
-logging.getLogger("Pyro5.core").setLevel(logging.DEBUG)

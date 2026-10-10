@@ -57,8 +57,6 @@ pip install "textual"
 # time zone lib (used in GCalender)
 pip install pytz
 
-#communication between Client and Daemon
-pip install Pyro5
 
 #SERIAL (with COBS encoding)
 pip install pyserial

@@ -2,7 +2,7 @@
   <br />PUT LOGO HERE
 </h1>
 
-<h4 align="center">Custom-built Daemon and Client for retro-inspired ControlPanel</h4>
+<h4 align="center">Custom-built Daemon for retro-inspired ControlPanel</h4>
 
 <p align="center">
     <a href="https://github.com/SupremeC/ControlPanelMasterPy/commits/master">
@@ -47,8 +47,6 @@ TODO - write text here...  Also link to other repo with final "showcase" product
 > [!IMPORTANT]  
 > Arduino needs to be connected via USB and powered up before starting the ControlPaneldaemon.
 
-> [!NOTE]  
-> Client allows you to monitor and interact with the Daemon. Its optional and not required to run.
 
 #### Daemon commands:
 ```console
@@ -64,8 +62,6 @@ If you want to fork this repo and customize it, pay special attention to these t
 + [daemon/controlpanel_class.py](https://github.com/SupremeC/ControlPanelMasterPy/blob/5aa683eba5b9cbf9b319cd330a82109abc30e227/daemon/controlpanel_class.py#L108)
 
 ## Dependencies
-+ [urwid/urwid](https://github.com/urwid/urwid) (Client: console user interface)
-+ [irmen/Pyro5](https://github.com/irmen/Pyro5) (comm between Client & Daemon)
 + [COBS](https://pypi.org/project/cobs/ "Consistent Overhead Byte Stuffing") (COBS encoding and decoding)
 + [numpy](https://numpy.org/) (manipulate & store audio data)
 + [spotify/pedalboard](https://github.com/spotify/pedalboard) (audio effects)
