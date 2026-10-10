@@ -55,7 +55,15 @@ foo@bar$ sudo systemctl start service_cp
 foo@bar$ sudo systemctl stop service_cp
 foo@bar$ sudo systemctl restart service_cp
 foo@bar$ journalctl -u service_cp -f
+foo@bar$ sudo systemctl kill -s USR1 service_cp   # morning routine compressed, alarm in 2 min
+foo@bar$ sudo systemctl kill -s USR2 service_cp   # night-off now: lights off, strips low red
 ```
+At 22:30 the panel goes dark for the night (`daemon/night.py`): the
+backlight, every LED and the drawer socket go off and the LED strips go
+to a dim red night light, silently. Until 05:00 a restart does it again
+and a status resync does not re-light anything; the flips and buttons
+keep working. The bed lamp and the bed socket are left alone. The times
+and the light are settings in `daemon/config.py`.
 
 #### Sound files:
 System sounds are WAV files in `daemon/systemsounds/`, named after the
