@@ -13,12 +13,6 @@ from daemon.sliding_window import SlidingWindow
 
 
 logger = logging.getLogger("daemon.PacketSerial")
-consoleHandler = logging.StreamHandler()
-logFormatter = logging.Formatter(
-    "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
-)
-consoleHandler.setFormatter(logFormatter)
-logger.addHandler(consoleHandler)
 
 
 class PacketSerial:

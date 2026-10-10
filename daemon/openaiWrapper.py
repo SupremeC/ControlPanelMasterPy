@@ -53,7 +53,6 @@ class OpenAiWrapper:
             arr = OpenAiWrapper.__build_morning_instr(weather, events)
             return self._send_chat(arr)
         except Exception as e:
-            print(e)
             logger.error(e)
         self.busy = False
         return ""
@@ -79,7 +78,6 @@ class OpenAiWrapper:
             arr = OpenAiWrapper.__build_events_instr(weather, events)
             return self._send_chat(arr)
         except Exception as e:
-            print(e)
             logger.error(e)
         self.busy = False
         return ""

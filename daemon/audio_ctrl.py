@@ -102,7 +102,7 @@ class AudioCtrl:
         self.enable_sound(True)
         self.set_volume(50)  # 0-100
 
-        print(f"Found {audioclipsfound} of audio clips")
+        logger.info("Found %d audio clips", audioclipsfound)
 
         self._running = True  # Internal flag to control the thread's lifecycle
         self._thread = threading.Thread(

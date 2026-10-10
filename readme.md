@@ -43,16 +43,18 @@ TODO - write text here...  Also link to other repo with final "showcase" product
 1. **[Download](https://github.com/SupremeC/ControlPanelMasterPy/archive/master.zip)** the latest version of ControlPanelMasterPy.
 2.  Open the _archive_ and **extract** the contents into a folder you choose.
 3.  Install all of the dependencies using `PIP3 install xyz`
-4. **Launch** the daemon `python3 controlPanelDaemon.py start`
+4. **Launch** the daemon `python3 control_panel_daemon.py` (runs in the foreground; stop with Ctrl+C)
 > [!IMPORTANT]  
 > Arduino needs to be connected via USB and powered up before starting the ControlPaneldaemon.
 
 
 #### Daemon commands:
+On the Raspberry Pi the daemon runs as the systemd service `service_cp`.
 ```console
-foo@bar$ python3 controlPanelDaemon.py start
-foo@bar$ python3 controlPanelDaemon.py stop
-foo@bar$ python3 controlPanelDaemon.py restart
+foo@bar$ sudo systemctl start service_cp
+foo@bar$ sudo systemctl stop service_cp
+foo@bar$ sudo systemctl restart service_cp
+foo@bar$ journalctl -u service_cp -f
 ```
 
 

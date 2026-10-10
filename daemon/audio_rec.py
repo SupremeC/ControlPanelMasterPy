@@ -112,7 +112,6 @@ class AudioRec:
         hosts = {}
         i = 0
         for hostapi in sd.query_hostapis():
-            print(str(i) + ": " + str(hostapi) + "\n")
             hosts[i] = str(hostapi)
             i = i + 1
         return hosts

@@ -10,10 +10,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import pytz
 
-if __name__ == "__main__":
-    from cevent import CEvent
-else:
-    from daemon.cevent import CEvent
+from daemon.cevent import CEvent
 
 
 logger = logging.getLogger("daemon.gCalender")
@@ -157,7 +154,6 @@ class Calender:
                     self.alarm = e
             self.events = items
             logger.info(f"downloaded {len(items)} calender events")
-            print(f"downloaded {len(items)} calender events")
             return items
         except HttpError as error:
             logger.error(f"An error occurred: {error}")
@@ -167,10 +163,7 @@ class Calender:
         # The file token.json stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        # print("Current working directory:", os.getcwd())
         folder = "daemon/"
-        if __name__ == "__main__":
-            folder = ""
 
         if os.path.exists("daemon/token.json"):
             self.creds = Credentials.from_authorized_user_file(
@@ -238,15 +231,3 @@ class Calender:
         if datetime.datetime.now(datetime.timezone.utc) > time_for_update:
             time_for_update += datetime.timedelta(days=1)
         return time_for_update
-
-
-if __name__ == "__main__":
-    cal = Calender(None, None)
-    while True:
-        do_alarm = cal.update()
-        do_alarm = cal.update()
-        do_alarm = cal.update()
-        events = cal.events
-        print(f"Do_alarm: {do_alarm}")
-        print(f"Events ({len(events)}): {events}")
-        break

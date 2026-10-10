@@ -22,8 +22,11 @@ import sys
 import threading
 import logging
 import os
-import daemon.setup_logger as setup_logger  # noqa
-from daemon.controlpanel_class import ControlPanel
+
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")  # before pygame is imported
+
+from daemon.setup_logger import configure_logging  # noqa: E402
+from daemon.controlpanel_class import ControlPanel  # noqa: E402
 
 logger = logging.getLogger("daemon")
 
@@ -32,6 +35,7 @@ LOOP_INTERVAL = 0.1  # seconds
 
 def main() -> int:
     """Runs the control panel until SIGTERM/SIGINT. Returns the exit code."""
+    configure_logging()
     stop_event = threading.Event()
 
     def on_signal(signum, _frame):

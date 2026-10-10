@@ -2,26 +2,16 @@
 
 import sys
 import logging
-from logging import handlers
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-logger.propagate = False
-formatter = logging.Formatter(
-    "%(asctime)s\t%(levelname)s\t%(funcName)10s()\t%(message)s"
-)
-
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.DEBUG)
-stdout_handler.setFormatter(formatter)
-
-file_handler = handlers.TimedRotatingFileHandler(
-    "logs.log", when="D", interval=1, backupCount=30
-)
-# file_handler = logging.FileHandler('logs.log')
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-# logger.addHandler(file_handler)
-logger.addHandler(stdout_handler)
-
+def configure_logging(level: int = logging.DEBUG) -> None:
+    """Sends all log records to stdout (journald under systemd).
+    Call once, from main()."""
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s\t%(levelname)s\t%(funcName)10s()\t%(message)s")
+    )
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(level)

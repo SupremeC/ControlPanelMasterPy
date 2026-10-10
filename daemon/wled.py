@@ -2,7 +2,6 @@ from enum import unique, Flag, auto
 import datetime
 import logging
 import queue
-import random
 import threading
 import numpy as np
 import serial
@@ -98,7 +97,7 @@ class WLED:
             if not self._ser.is_open:
                 self._ser.open()
                 time.sleep(0.1)
-                if self._ser.is_open():
+                if self._ser.is_open:
                     logger.info(f"Established WLED connection on {self._uart_port}.")
                 else:
                     logger.info("Failed to establish connection")
@@ -351,9 +350,9 @@ class WLED:
                 # print(f"Received: {json_string}")
                 return json_data
         except json.JSONDecodeError:
-            print("Received non-JSON data.")
+            logger.warning("Received non-JSON data from WLED")
         except Exception as e:
-            print(f"Error reading JSON: {e}")
+            logger.error("Error reading JSON from WLED: %s", e)
         return None
 
     def __str__(self):
@@ -364,62 +363,3 @@ class WLED:
             str: A human-readable string of me.
         """
         return f"WLED(uart_port={self._uart_port}, " f"baud_rate={self._baud_rate}"
-
-
-if __name__ == "__main__":
-    wled_instance = WLED()
-
-    def main_menu():
-        print("===============")
-        print("1: Toggle WLED ON/OFF state")
-        print("11: Set WLED state ON")
-        print("12: Set WLED state OFF")
-        print("2: Get WLED state")
-        print("3: Read full state as string")
-        print("4: Previous effect")
-        print("5: Next effect")
-        print("6: Set solid color = Rnd")
-        print("7: Rnd brightness")
-        print("77: Sunrise")
-        print("8: Toggle segment 1 ON/OFF state")
-        print("9: Exit()")
-        choice = input("prompt")
-        if choice == "1":
-            wled_instance.toggle_wled_state()
-        if choice == "11":
-            wled_instance.set_wled_state(True)
-        if choice == "12":
-            wled_instance.set_wled_state(False)
-        if choice == "2":
-            result = wled_instance.read_state()
-            print(result)
-        elif choice == "3":
-            data_to_send = {"v": True}
-            wled_instance._enqueue_command(data_to_send)
-            json_string = wled_instance._read_whole_json_message()
-            json_string = json.dumps(json_string, indent=4)
-            print(f"Received: {json_string}")
-        elif choice == "4":
-            wled_instance.previous_effect(1)
-        elif choice == "5":
-            wled_instance.next_effect(1)
-        elif choice == "6":
-            wled_instance.set_color(
-                [
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                ],
-                1,
-            )
-        elif choice == "7":
-            wled_instance.set_brightness(random.randint(0, 255), 1)
-        elif choice == "77":
-            wled_instance._do_sunrise(66)
-        if choice == "8":
-            wled_instance.toggle_wled_state(segment=1)
-        elif choice == "9":
-            exit()
-
-    while True:
-        main_menu()
