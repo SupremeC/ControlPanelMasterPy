@@ -41,8 +41,11 @@ class EventLoopTestCase(unittest.TestCase):
         cp.cal = mock.Mock()
         cp.cal.todays_events.return_value = []
         cp.speech = mock.Mock()
+        cp.speech.wake_line.return_value = ("WAKE", "VOICE")
         cp.weather = mock.Mock()
-        cp.weather.report.return_value = mock.Mock(facts="FACTS", sentence="SENTENCE")
+        cp.weather.report.return_value = mock.Mock(
+            facts="FACTS", sentence="SENTENCE", days=()
+        )
         for lane in (cp._audio_jobs, cp._ai_jobs, cp._wled_jobs):
             lane.start()
             self.addCleanup(lane.stop)
@@ -255,9 +258,10 @@ class TestMorningWiring(EventLoopTestCase):
         self.assertTrue(
             self.process_until(lambda: self.cp.morning.state == State.DONE, timeout=5)
         )
-        self.cp.speech.wake_text.assert_called_once_with(  # prepared, not again
-            mock.ANY, "FACTS", school_day=False
+        self.cp.speech.wake_line.assert_called_once_with(  # prepared, not again
+            mock.ANY, "FACTS", school_day=False, weather_day=None
         )
+        self.cp.speech.say.assert_called_once_with("WAKE", "VOICE")
         self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.speech.say.return_value)
         self.cp._audioctrl.volume_override.assert_called_with(False, 70)
@@ -287,7 +291,9 @@ class TestMorningWiring(EventLoopTestCase):
         self.assertTrue(self.process_until(lambda: self.cp.speech.say.called))
 
         # assert
-        self.cp.speech.wake_text.assert_called_once_with(mock.ANY, "FACTS", school_day=True)
+        self.cp.speech.wake_line.assert_called_once_with(
+            mock.ANY, "FACTS", school_day=True, weather_day=None
+        )
 
     def test_speechFails_onlyTheChimePlays(self):
         # arrange

@@ -120,6 +120,11 @@ class Config:
     humour_style: str = "torr"
     # Fixed texts (countdown) are synthesised once and kept here.
     speech_cache_dir: Path = DAEMON_DIR / "speech_cache"
+    # Hand-rated wake-up jokes (daemon/jokes.py) and when each was told.
+    # Gitignored. Without the pool the text model writes the joke.
+    jokes_file: Path = DAEMON_DIR / "jokes.json"
+    joke_state_file: Path = DAEMON_DIR / "joke_state.json"
+    joke_repeat_days: int = 45
 
     # Weather (SMHI, see daemon/weather.py). Parts of the day in local
     # hours, start to end; a part gets the forecast steps ending after its

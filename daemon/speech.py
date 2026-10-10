@@ -1,10 +1,11 @@
 """What the panel says, in Swedish (GH #14).
 
 Facts come from local templates, the same order every day, so nothing is
-made up and the texts become predictable. The text model writes only
-two things: a joke for the wake line and the clothing advice from the
-weather facts. Its reply is checked locally (JSON, length, Swedish); on
-failure the template goes without the joke and with the weather sentence.
+made up and the texts become predictable. The wake line's joke comes
+from a hand-rated pool (daemon/jokes.py). The text model writes the
+clothing advice from the weather facts, and the joke only when the pool
+is empty. Its reply is checked locally (JSON, length, Swedish); on
+failure the template goes without it, or with the weather sentence.
 
 - Wake line (in bed, after the alarm): greeting, weekday, joke, "clothes
   on, then breakfast". Nothing to remember.
@@ -29,7 +30,9 @@ from daemon import agenda
 from daemon.agenda import Item, Kind
 from daemon.cevent import CEvent
 from daemon.config import Config
+from daemon.jokes import JokeBox
 from daemon.personal import MONTHS, WEEKDAYS, Personal, swedish_date
+from daemon.weather import DayWeather
 
 logger = logging.getLogger("daemon.speech")
 
@@ -97,7 +100,27 @@ STYLES = {
         "Pappaskämt: så dåliga att de blir roliga.",
         "Varm och lite för nöjd med sitt eget skämt.",
     ),
+    "nyhetsuppläsare": Style(
+        "Extra nyhetssändning: morgonen och sängen rapporteras som stora "
+        "nyheter, med allvarlig nyhetston.",
+        "Som en allvarlig nyhetsuppläsare i radio.",
+    ),
+    "klassiker": Style(
+        "Klassiska roliga historier och gåtor: en fråga, sedan poängen.",
+        "Varm och finurlig. Läs frågan, gör en tydlig paus, sedan poängen.",
+    ),
+    "naturfilm": Style(
+        "Naturfilmsberättare som viskande beskriver en sovande tonåring som "
+        "ett sällsynt djur i sitt bo.",
+        "Lugn, låg och fascinerad, som en naturfilmsberättare.",
+    ),
 }
+# Weekday and weather tags on pooled jokes; a joke with tags is only told
+# when all of them fit the day.
+JOKE_TAGS = (
+    "måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag", "söndag",
+    "regn", "snö", "kallt", "varmt", "mörkt", "sol",
+)
 DEFAULT_STYLE = "torr"
 
 SYSTEM = (
@@ -108,6 +131,13 @@ SYSTEM = (
     "överdriven peppning. Hitta aldrig på fakta om världen; använd bara det "
     "som står i meddelandet. Skriv alltid på svenska, aldrig på något annat "
     "språk. Svara bara med ett JSON-objekt."
+)
+
+CLOTHES_SHORT_ASK = (
+    '"klader_kort": högst fyra ord om vilka kläder som passar idag enligt '
+    "vädret, bara det man tar på sig när man går upp, inga ytterkläder "
+    '(jacka, mössa, skor), till exempel "långbyxor och tjocktröja" eller '
+    '"t-shirt räcker".'
 )
 
 # Field limits in characters; a longer reply is rejected.
@@ -150,6 +180,16 @@ def looks_swedish(text: str) -> bool:
     foreign = sum(w in _FOREIGN for w in words)
     has_letters = any(c in "åäö" for c in text.casefold())
     return (swedish > 0 or has_letters) and foreign * 3 <= swedish
+
+
+_PAUSE_DASH = re.compile(r"\s*(?:[–—]|(?<=\s)-(?=\s))\s*")
+
+
+def spoken(text: str) -> str:
+    """The text as it is sent to text-to-speech: a free-standing dash
+    ('? – Navigator.') is a pause, not a word. Hyphens inside words
+    ('t-shirt', 'Sov-jet') stay."""
+    return _PAUSE_DASH.sub("... ", text).strip()
 
 
 def countdown_text(minutes: int) -> str:
@@ -213,6 +253,9 @@ class Speech:
         self._ai = ai
         self._cfg = config or Config()
         self._recent_jokes: deque[str] = deque(maxlen=RECENT_JOKES)
+        self._jokes = JokeBox(
+            self._cfg.jokes_file, self._cfg.joke_state_file, self._cfg.joke_repeat_days
+        )
 
     # ---- texts ------------------------------------------------------------
 
@@ -226,16 +269,40 @@ class Speech:
             style = STYLES[DEFAULT_STYLE]
         return style
 
+    def wake_line(
+        self,
+        now: datetime.datetime,
+        weather_facts: str = "",
+        school_day: bool = False,
+        weather_day: DayWeather | None = None,
+    ) -> tuple[str, str]:
+        """The wake line and how to read it (text-to-speech instructions):
+        today's joke from the rated pool in its own style, else one from
+        the text model in the configured style."""
+        joke = self._jokes.next(now.date(), weather_day)
+        if joke is None:
+            style = self.style()
+            return self.wake_text(now, weather_facts, school_day, style), self.wake_voice(style)
+        style = STYLES.get(joke.style, self.style())
+        text = self.wake_text(now, weather_facts, school_day, style, joke=joke.text)
+        return text, self.wake_voice(style)
+
     def wake_text(
         self,
         now: datetime.datetime,
         weather_facts: str = "",
         school_day: bool = False,
         style: Style | None = None,
+        joke: str | None = None,
     ) -> str:
-        """'God morgon, Kim. Tisdag. <joke> Kläderna på – tjocktröja idag – sen frukost.'"""
+        """'God morgon, Kim. Tisdag. <joke> Kläderna på – tjocktröja idag – sen frukost.'
+        Without `joke` the text model writes one."""
         name = self.personal().name
-        lines = self._wake_lines(now.date(), weather_facts, school_day, style or self.style())
+        lines = self._wake_lines(
+            now.date(), weather_facts, school_day, style or self.style(), want_joke=joke is None
+        )
+        if joke is not None:
+            lines = AiLines(joke=joke, clothes_short=lines.clothes_short)
         parts = [
             f"God morgon{', ' + name if name else ''}.",
             f"{WEEKDAYS[now.weekday()].capitalize()}.",
@@ -312,8 +379,15 @@ class Speech:
         return SYSTEM.format(listener=self.personal().describe(today).rstrip(","))
 
     def _wake_lines(
-        self, day: datetime.date, weather_facts: str, school_day: bool, style: Style
+        self,
+        day: datetime.date,
+        weather_facts: str,
+        school_day: bool,
+        style: Style,
+        want_joke: bool = True,
     ) -> AiLines:
+        if not want_joke:
+            return AiLines(clothes_short=self._clothes_short(day, weather_facts))
         name = self.personal().name or "lyssnaren"
         weather = f"Väder:\n{weather_facts}" if weather_facts else "Väder: saknas."
         avoid = ""
@@ -328,10 +402,7 @@ class Speech:
             "morgonen, sängen, frukosten, veckodagen eller vädret. Inte elak. "
             "Hälsningen och veckodagen sägs redan före repliken: upprepa dem "
             "inte. Hellre en tydlig poäng än en stämning.\n"
-            '"klader_kort": högst fyra ord om vilka kläder som passar idag enligt '
-            "vädret, bara det man tar på sig när man går upp, inga ytterkläder "
-            '(jacka, mössa, skor), till exempel "långbyxor och tjocktröja" eller '
-            '"t-shirt räcker". Tom sträng om vädret saknas.'
+            f"{CLOTHES_SHORT_ASK} Tom sträng om vädret saknas."
             f"{avoid}\n\n"
             'Svara på svenska med JSON: {"skamt": "...", "klader_kort": "..."}'
         )
@@ -342,6 +413,18 @@ class Speech:
             return AiLines()
         short = reply["klader_kort"] if weather_facts else ""
         return AiLines(joke=reply["skamt"], clothes_short=short)
+
+    def _clothes_short(self, day: datetime.date, weather_facts: str) -> str:
+        """A few words on what to put on when getting up, '' without
+        weather or when the model fails."""
+        if not weather_facts:
+            return ""
+        user = (
+            f"Väder:\n{weather_facts}\n\n{CLOTHES_SHORT_ASK}\n\n"
+            'Svara på svenska med JSON: {"klader_kort": "..."}'
+        )
+        reply = self._ask(day, user, {"klader_kort": MAX_CLOTHES_SHORT})
+        return reply["klader_kort"] if reply else ""
 
     def _clothes(self, weather_facts: str, when: str, day: datetime.date) -> str:
         """One sentence of clothing advice, '' without weather or when the
@@ -379,7 +462,7 @@ class Speech:
     def say(self, text: str, instructions: str = VOICE_PLAIN) -> bytes:
         """Text-to-speech, MP3. Blocking; raises on failure."""
         logger.info("Speaking: %s", text)
-        return self._ai.speak(text, instructions)
+        return self._ai.speak(spoken(text), instructions)
 
     def wake_voice(self, style: Style | None = None) -> str:
         return f"{VOICE_BASE} {(style or self.style()).voice}"
@@ -395,7 +478,7 @@ class Speech:
             return path.read_bytes()
         except FileNotFoundError:
             pass
-        audio = self._ai.speak(text, instructions)
+        audio = self._ai.speak(spoken(text), instructions)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(audio)

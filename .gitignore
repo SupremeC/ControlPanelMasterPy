@@ -31,3 +31,5 @@ pyvenv.cfg
 __pycache__/
 wget-log*
 daemon/speech_cache/
+daemon/jokes.json
+daemon/joke_state.json

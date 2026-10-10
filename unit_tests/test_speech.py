@@ -20,6 +20,7 @@ from daemon.speech import (
     join_sv,
     looks_swedish,
     school_event,
+    spoken,
 )
 
 
@@ -56,6 +57,20 @@ class TestWords(unittest.TestCase):
         self.assertFalse(looks_swedish("El desayuno te espera y es para ti."))
         self.assertFalse(looks_swedish("The breakfast is waiting for you."))
 
+    def test_spoken_dashIsAPause(self):
+        cases = {
+            "Vad kallar man en alligator som ätit en GPS? – Navigator.":
+                "Vad kallar man en alligator som ätit en GPS?... Navigator.",
+            "Vilka är alltid aktiva i skogen?– Träna.": "Vilka är alltid aktiva i skogen?... Träna.",
+            "Kläderna på – t-shirt – sen frukost.": "Kläderna på... t-shirt... sen frukost.",
+            "I vilket land är man aldrig tyst? - I-tal-igen.":
+                "I vilket land är man aldrig tyst?... I-tal-igen.",
+            "Sov-jet!": "Sov-jet!",
+        }
+        for text, want in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(want, spoken(text))
+
     def test_countdown(self):
         self.assertEqual("15 minuter kvar.", countdown_text(15))
         self.assertEqual("Dags att gå. Ha en bra dag!", countdown_text(0))
@@ -85,7 +100,12 @@ class SpeechTestCase(unittest.TestCase):
             "bring": {"weekdays": {"tisdag": ["gympapåsen"]},
                       "keywords": {"scout": ["scoutskjortan"]}},
         }), encoding="utf-8")
-        self.cfg = Config(personal_file=personal, speech_cache_dir=self.dir / "cache")
+        self.cfg = Config(
+            personal_file=personal,
+            speech_cache_dir=self.dir / "cache",
+            jokes_file=self.dir / "jokes.json",
+            joke_state_file=self.dir / "joke_state.json",
+        )
         self.ai = mock.Mock()
         self.speech = Speech(self.ai, self.cfg)
 
@@ -156,6 +176,44 @@ class TestWakeLine(SpeechTestCase):
         self.speech.wake_text(at("2026-10-13 06:45"))
         self.speech.wake_text(at("2026-10-14 06:45"))
         self.assertIn("Sängen har gjort sitt", self.ai.chat_json.call_args.args[1])
+
+
+class TestWakeLineFromPool(SpeechTestCase):
+    def test_poolJoke_inItsOwnStyle_modelOnlyForClothes(self):
+        # arrange
+        (self.dir / "jokes.json").write_text(json.dumps([
+            {"id": "j1", "style": "naturfilm", "tags": [], "text": "Här ser vi tonåringen i sitt bo"},
+        ]), encoding="utf-8")
+        self.ai.chat_json.return_value = {"klader_kort": "långbyxor och tröja"}
+
+        # act
+        text, voice = self.speech.wake_line(at("2026-10-13 06:45"), "Väder idag")
+
+        # assert
+        self.assertEqual(
+            "God morgon, Kim. Tisdag. Här ser vi tonåringen i sitt bo. "
+            "Kläderna på – långbyxor och tröja – sen frukost.",
+            text,
+        )
+        self.assertIn("naturfilmsberättare", voice)
+        user = self.ai.chat_json.call_args.args[1]
+        self.assertNotIn("skamt", user)
+        self.assertIn("klader_kort", user)
+
+    def test_poolJoke_noWeather_noModelCall(self):
+        (self.dir / "jokes.json").write_text(json.dumps([
+            {"id": "j1", "style": "torr", "tags": [], "text": "Sängen har gjort sitt."},
+        ]), encoding="utf-8")
+        text, _ = self.speech.wake_line(at("2026-10-13 06:45"))
+        self.assertIn("Sängen har gjort sitt. Kläderna på, sen frukost.", text)
+        self.ai.chat_json.assert_not_called()
+
+    def test_noPool_modelWritesTheJoke(self):
+        self.ai.chat_json.return_value = {"skamt": "Frukosten väntar på dig", "klader_kort": ""}
+        with self.assertLogs("daemon.jokes", "INFO"):
+            text, voice = self.speech.wake_line(at("2026-10-13 06:45"))
+        self.assertIn("Frukosten väntar på dig.", text)
+        self.assertIn("Torr", voice)
 
 
 class TestOverview(SpeechTestCase):

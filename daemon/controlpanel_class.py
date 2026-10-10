@@ -751,11 +751,14 @@ class ControlPanel:
         """The wake line. Without the text model it is the template
         without the joke; it raises only when speech fails."""
         self.cal.fetch()
-        facts, _ = self._weather_parts()
-        text = self.speech.wake_text(
-            datetime.datetime.now(TIMEZONE), facts, school_day=self._leave_time() is not None
+        report = self._weather_report()
+        text, voice = self.speech.wake_line(
+            datetime.datetime.now(TIMEZONE),
+            report.facts if report else "",
+            school_day=self._leave_time() is not None,
+            weather_day=report.days[0] if report and report.days else None,
         )
-        return self.speech.say(text, self.speech.wake_voice())
+        return self.speech.say(text, voice)
 
     def _prepare_briefing(self) -> None:
         self._briefing_audio = None
