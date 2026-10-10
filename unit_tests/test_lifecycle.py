@@ -7,6 +7,7 @@ call start() on a real AudioCtrl or ControlPanel here.
 """
 
 import json
+import logging
 import tempfile
 import threading
 import time
@@ -20,6 +21,7 @@ from daemon.audio_ctrl import AudioCtrl
 from daemon.controlpanel_class import ControlPanel
 from daemon.gCalender import Calender
 from daemon.openaiWrapper import OpenAiWrapper
+from daemon.setup_logger import QUIET_LOGGERS, configure_logging
 from daemon.wled import WLED
 
 
@@ -195,6 +197,45 @@ class TestAudioLifecycle(unittest.TestCase):
 
         # assert
         mock_mixer.quit.assert_not_called()
+
+    @mock.patch("daemon.audio_ctrl.subprocess.run")
+    def test_playBytes_pipesMp3ToQuietFfplay(self, mock_run, _mock_mixer):
+        # arrange
+        audio = AudioCtrl(lambda _on: None)
+
+        # act
+        audio.play_bytes(b"mp3-data")
+
+        # assert
+        args, kwargs = mock_run.call_args
+        self.assertEqual("ffplay", args[0][0])
+        self.assertIn("-loglevel", args[0])
+        self.assertEqual(b"mp3-data", kwargs["input"])
+        self.assertTrue(kwargs["check"])
+
+
+class TestLoggingSetup(unittest.TestCase):
+    def setUp(self):
+        root = logging.getLogger()
+        saved = (root.handlers[:], root.level)
+        quiet = {n: logging.getLogger(n).level for n in QUIET_LOGGERS}
+
+        def restore():
+            root.handlers[:], root.level = saved
+            for name, level in quiet.items():
+                logging.getLogger(name).setLevel(level)
+
+        self.addCleanup(restore)
+
+    def test_thirdPartyDebugIsSilenced(self):
+        # act
+        configure_logging()
+
+        # assert
+        self.assertEqual(1, len(logging.getLogger().handlers))
+        self.assertFalse(logging.getLogger("openai").isEnabledFor(logging.DEBUG))
+        self.assertFalse(logging.getLogger("httpcore").isEnabledFor(logging.INFO))
+        self.assertTrue(logging.getLogger("daemon.ctrlPanel").isEnabledFor(logging.DEBUG))
 
 
 @mock.patch("daemon.audio_ctrl.mixer")

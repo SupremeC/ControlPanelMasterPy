@@ -3,6 +3,17 @@
 import sys
 import logging
 
+# Third-party loggers and the most they may log. At DEBUG, openai logs
+# whole request bodies, including the base64 recordings sent to it.
+QUIET_LOGGERS = {
+    "openai": logging.WARNING,
+    "httpcore": logging.WARNING,
+    "httpx": logging.INFO,  # one "HTTP Request: POST ... 200 OK" line per call
+    "googleapiclient": logging.WARNING,
+    "pydub": logging.WARNING,
+    "urllib3": logging.WARNING,
+}
+
 
 def configure_logging(level: int = logging.DEBUG) -> None:
     """Sends all log records to stdout (journald under systemd).
@@ -15,3 +26,5 @@ def configure_logging(level: int = logging.DEBUG) -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level)
+    for name, quiet_level in QUIET_LOGGERS.items():
+        logging.getLogger(name).setLevel(quiet_level)

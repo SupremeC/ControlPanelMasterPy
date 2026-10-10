@@ -5,6 +5,7 @@ import logging
 import random
 import shutil
 import string
+import subprocess
 import threading
 import base64
 from pathlib import Path
@@ -15,9 +16,6 @@ from pygame import mixer
 from daemon.audio_rec import AudioRec
 from daemon.audio_effects import AudioEffect, EffectType
 import daemon.global_variables
-from pydub import AudioSegment
-from pydub.playback import play
-import io
 
 logger = logging.getLogger("daemon.audioCtrl")
 
@@ -186,10 +184,16 @@ class AudioCtrl:
         except OSError as e:
             logger.exception(e)
 
-    def play_bytes(self, p_bytes) -> None:
-        """Blocking"""
-        audio_data = AudioSegment.from_file(io.BytesIO(p_bytes), format="mp3")
-        play(audio_data)
+    def play_bytes(self, p_bytes: bytes) -> None:
+        """Blocking: plays MP3 data with ffplay until it ends. ffplay is what
+        pydub used here too, but pydub let it print its progress to the
+        journal."""
+        subprocess.run(
+            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", "-i", "pipe:0"],
+            input=p_bytes,
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
 
     def stop_alarm(self) -> None:
         if self.alarm_sound is not None:
