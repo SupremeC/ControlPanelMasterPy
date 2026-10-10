@@ -46,6 +46,25 @@ class Config:
 
     # Morning routine
     sunrise_minutes: int = 30
+    sunrise_tick_seconds: float = 2  # between frames; WLED fades in between
+    # Sunrise light (see daemon/sunrise.py). Colours are RGBW; W is the
+    # strips' own white LED. The end values are tuned on the real strips
+    # with tools/sunrise_demo.py.
+    sunrise_start_brightness: int = 1
+    sunrise_end_brightness: int = 255
+    # (progress, RGBW) stops before the end colour. WLED gamma-corrects
+    # colours, so a mid value like G=100 shows as nearly 0: the stops
+    # need higher values than they look. W comes in late and gently
+    # because the white LED outshines RGB.
+    sunrise_colour_stops: tuple[tuple[float, tuple[int, int, int, int]], ...] = (
+        (0.0, (255, 30, 0, 0)),  # deep red
+        (0.15, (255, 100, 0, 0)),  # red-orange
+        (0.30, (255, 150, 10, 20)),  # orange, W starts
+        (0.45, (255, 160, 30, 90)),  # amber
+        (0.55, (255, 150, 40, 170)),
+    )
+    sunrise_end_rgbw: tuple[int, int, int, int] = (255, 140, 40, 255)  # warm white
+    sunrise_white_at: float = 0.7  # share of the sunrise until warm white
     # An alarm missed by up to this much (daemon restart) still rings.
     late_start_grace_minutes: int = 15
 

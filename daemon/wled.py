@@ -3,12 +3,14 @@ import datetime
 import logging
 import queue
 import threading
-import numpy as np
 import serial
 import json
 import time
-from typing import Callable, Dict, Any, NamedTuple, Optional
+from typing import Callable, Dict, Any, NamedTuple, Optional, Sequence
 from typing import List
+
+from daemon import sunrise
+from daemon.config import Config
 
 
 logger = logging.getLogger("daemon.WLED")
@@ -185,9 +187,9 @@ class WLED:
         self, dur_sec: int = 20 * 60, p_callback: Callable[[], None] = None
     ) -> None:
         """
-        Gradually increasing intensity while fading color from red to yellow.
-        This function returns immediately,as the sunrise effect is performed in a
-        child thread.
+        Runs the sunrise curve (daemon/sunrise.py) on both segments for
+        dur_sec seconds. Returns immediately; a child thread does the work.
+        Panel input to WLED is ignored until it is done.
 
         :param dur_sec: Duration of the Sunrise effect in seconds
         :type dur_sec: int
@@ -207,71 +209,40 @@ class WLED:
     def _do_sunrise(self, dur_sec: int, p_callback: Callable[[], None] = None) -> None:
         # User is not allowed to use WLED until Sunrise effect is complete
         self._accept_commands = False
-
-        start_bri = 5
-        start_color = [255, 34, 3, 1]  # dark red
-        end_bri = 200
-        end_color = [250, 196, 3, 64]  # light yellow
-        steps = 600
-
-        # Turn down brightness before we begin doing sunrise
-        data_to_send = {
-            "on": True,
-            "seg": [
-                {"id": 0, "on": True, "fx": 0, "bri": 1, "col": [start_color]},
-                {"id": 1, "on": True, "fx": 0, "bri": 1, "col": [start_color]},
-            ],
-        }
-        self._enqueue_command(data_to_send, True)
-
-        steps_s = dur_sec / steps
-        for i in range(steps):
-            color = WLED.color_transform(start_color, end_color, i / steps)
-            color = [int(item) for item in color]
-            bri = ((end_bri - start_bri) / steps) * i
-            data_to_send = {
-                "on": True,
-                "bri": 255,
-                "seg": [
-                    {
-                        "id": 0,
-                        "on": True,
-                        "fx": 0,
-                        "bri": int(bri),
-                        "col": [color],
-                    },
-                    {
-                        "id": 1,
-                        "on": True,
-                        "fx": 0,
-                        "bri": int(bri),
-                        "col": [color],
-                    },
-                ],
-            }
-            self._enqueue_command(data_to_send, True)
-            if self._stop_event.wait(steps_s):
-                self._accept_commands = True
-                return
-        self._accept_commands = True
+        tick = Config.sunrise_tick_seconds
+        started = time.monotonic()
+        try:
+            while True:
+                progress = (time.monotonic() - started) / dur_sec
+                self.set_both(*sunrise.frame(progress), transition=tick)
+                if progress >= 1:
+                    break
+                if self._stop_event.wait(tick):
+                    return
+        finally:
+            self._accept_commands = True
         if p_callback is not None:
             p_callback()
 
-    @staticmethod
-    def color_transform(fromcolor, tocolor, percent: float):
-        """Transforms a color to target color
-
-        :param fromcolor:  color is rgbw between (0, 0, 0, 0)
-        :param tocolor:  color is rgbw between (0, 0, 0, 0)
-        :param percent: from 0.0 to 1.0
-        :type percent: float
-        :return: transformed color
-        :rtype: NDArray[floating[Any]]"""
-        percent = max(0, min(percent, 1))
-        fromcolor = np.array(fromcolor)
-        tocolor = np.array(tocolor)
-        vector = tocolor - fromcolor
-        return fromcolor + vector * percent
+    def set_both(
+        self, brightness: int, rgbw: Sequence[int], transition: float = 0
+    ) -> None:
+        """Turns both segments on, effect off, with this brightness (0-255)
+        and RGBW colour. WLED fades to it over `transition` seconds.
+        Not blocked by the sunrise, which uses it."""
+        seg = {
+            "on": True,
+            "fx": 0,
+            "bri": max(0, min(int(brightness), 255)),
+            "col": [[max(0, min(int(c), 255)) for c in rgbw]],
+        }
+        data_to_send = {
+            "on": True,
+            "bri": 255,
+            "transition": round(transition * 10),  # in 100 ms
+            "seg": [{"id": 0, **seg}, {"id": 1, **seg}],
+        }
+        self._enqueue_command(data_to_send, True)
 
     def set_color(self, color: List[int], segment: int) -> None:
         # fx = 0 (Turn off effect)
