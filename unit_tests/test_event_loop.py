@@ -21,6 +21,7 @@ from daemon.controlpanel_class import ControlPanel, EFFECT_BUTTONS
 from daemon.events import CalendarAlarm, MorningTest, NightTest, PlaybackChanged
 from daemon.gCalender import TIMEZONE
 from daemon.morning import State
+from daemon.night import NightOff
 from daemon.packet import BlinkTarget, HWEvent, Packet, PwmBoard
 
 
@@ -746,6 +747,82 @@ class TestNightOff(EventLoopTestCase):
         # assert
         self.assertLess(self.cp._packet_sendqueue.qsize(), 200)
         self.cp._audioctrl.sysaudio_play.assert_not_called()
+
+
+class TestStatusResyncAtNight(EventLoopTestCase):
+    """A STATUS reply (daemon restart, Mega reboot) inside the night
+    window must not re-light what the night-off turned off."""
+
+    def night(self, active: bool):
+        patcher = mock.patch.object(
+            NightOff, "active", new_callable=mock.PropertyMock, return_value=active
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def status(self, pin: int, val: int) -> list:
+        self.cp._events.put(Packet(HWEvent.STATUS, pin, val))
+        self.cp.process(max_wait=0)
+        return [p for p in self.sent_packets() if p.hw_event != HWEvent.HELLO]
+
+    def test_backlightFlipUp_atNight_trackedButDark(self):
+        # arrange
+        self.night(True)
+
+        # act
+        packets = self.status(14, 1)
+
+        # assert
+        self.assertEqual([], packets)
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
+        self.assertTrue(self.cp._ctrls.get_ctrl_by_name("BacklightSw").state)
+        self.assertFalse(self.cp._ctrls.get_ctrl_by_name("BacklightRelay").state)
+
+    def test_backlightFlipUp_byDay_lightsAsBefore(self):
+        # arrange
+        self.night(False)
+
+        # act
+        packets = self.status(14, 1)
+
+        # assert
+        self.assertIn((44, 0), [(p.target, p.val) for p in packets if p.hw_event == HWEvent.RELAY])
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.BG_LIGHT_ON)
+        self.assertTrue(self.cp._ctrls.get_ctrl_by_name("BacklightRelay").state)
+
+    def test_auxFlipUp_atNight_trackedWithoutBlink(self):
+        # arrange
+        self.night(True)
+        self.panel_on()
+
+        # act
+        packets = self.status(40, 1)
+
+        # assert
+        self.assertEqual([], packets)
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
+        self.assertTrue(self.cp._ctrls.get_ctrl(40).state)
+
+    def test_auxFlipDown_atNight_stillTurnsTheRelayOff(self):
+        # arrange
+        self.night(True)
+        self.panel_on()
+
+        # act
+        packets = self.status(40, 0)
+
+        # assert
+        self.assertIn((46, 1), [(p.target, p.val) for p in packets if p.hw_event == HWEvent.RELAY])
+
+    def test_masterSwitch_atNight_isStillTracked(self):
+        # arrange
+        self.night(True)
+
+        # act
+        self.status(12, 1)
+
+        # assert
+        self.assertTrue(self.cp._ctrls.get_ctrl_by_name("masterSw").state)
 
 
 if __name__ == "__main__":

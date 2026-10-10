@@ -367,6 +367,17 @@ class ControlPanel:
                 self._track_main_switches(packet)
                 return
 
+            # A status resync at night (daemon restart, Mega reboot) keeps
+            # the flip states but re-lights nothing: the backlight stays
+            # dark and an aux flip that is up does not blink its button.
+            if no_action and self.night.active:
+                if packet.target == 14:
+                    self._ctrls.get_ctrl_by_name("BacklightSw").state = bool(packet.val)
+                    return
+                if 38 <= packet.target <= 41 and packet.val == 1:
+                    self._ctrls.get_ctrl(packet.target).state = True
+                    return
+
             if packet.target == 12:  # MainSwitch
                 mastersw.state = bool(packet.val)
                 if mastersw.state:
