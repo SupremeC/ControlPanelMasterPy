@@ -130,6 +130,14 @@ class Config:
     # older than this asks for a fresh read, which a later request sees.
     wled_snapshot_max_age: float = 3  # seconds
 
+    # Web API and page (daemon/webapi.py). LAN only, no auth: the Pi sits
+    # on the home WiFi. Off in tests and tools (web_enabled False).
+    web_enabled: bool = True
+    web_host: str = "0.0.0.0"
+    web_port: int = 8080
+    web_dir: Path = DAEMON_DIR / "web"  # the page; without it, a link to /docs
+    web_command_timeout: float = 3  # seconds the HTTP thread waits for the main loop
+
     # Speech (daemon/speech.py): local Swedish templates, the text model
     # only for the joke and the clothing advice, then text-to-speech. One
     # voice for everything, also the answers to recorded questions

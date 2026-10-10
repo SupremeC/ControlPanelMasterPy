@@ -73,6 +73,16 @@ The morning routine's `alarm_soft.wav`, `chime_off.wav` and
 any of them with your own WAV (48 kHz mono, the alarm loopable) and
 restart the daemon.
 
+#### Web page and API:
+The daemon serves a page and a JSON API on the LAN, port 8080
+(`web_port` in `daemon/config.py`), without authentication: anyone on
+the WiFi can switch the sockets and lamps. `http://<pi>:8080/` is the
+page (not written yet), `http://<pi>:8080/docs` the interactive API
+description. Actions are `POST` only; `GET` never changes anything. The
+API bypasses the panel's master, inputs and safety switches on purpose,
+so things can be turned off from a phone when the panel is off. Set
+`web_enabled = False` to run without it.
+
 #### Tools:
 Run on the Pi from the repo root with the daemon stopped (they use the
 LED strips or the speaker themselves):

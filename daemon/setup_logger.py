@@ -12,6 +12,10 @@ QUIET_LOGGERS = {
     "googleapiclient": logging.WARNING,
     "pydub": logging.WARNING,
     "urllib3": logging.WARNING,
+    # The web API: webapi.py logs its own start line; access logging is off.
+    "uvicorn": logging.WARNING,
+    "uvicorn.error": logging.WARNING,
+    "uvicorn.access": logging.WARNING,
 }
 
 

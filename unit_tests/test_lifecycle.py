@@ -318,6 +318,7 @@ class TestControlPanelLifecycle(unittest.TestCase):
             ("wled_instance", "wled"),
             ("_audioctrl", "audio"),
             ("cal", "calendar"),
+            ("_webapi", "web"),  # never a real one here: it binds a port
         ):
             fake = mock.Mock()
             fake.start.side_effect = lambda n=name: calls.append(f"{n}.start")
@@ -355,6 +356,8 @@ class TestControlPanelLifecycle(unittest.TestCase):
                 "wled.start",
                 "audio.start",
                 "calendar.start",
+                "web.start",
+                "web.stop",
                 "calendar.stop",
                 "audio.stop",
                 "wled.stop",

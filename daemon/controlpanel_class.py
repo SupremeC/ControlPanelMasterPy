@@ -23,6 +23,7 @@ from .events import (
     PlaybackChanged,
 )
 from .remote import Remote
+from .webapi import WebApi
 from .workers import Workers
 from .wled import WLED, WledStateSnapshot
 from daemon.audio_ctrl import (
@@ -177,6 +178,7 @@ class ControlPanel:
         self._wled_snapshot_at: float = 0.0
         self._wled_snapshot_job: Future | None = None
         self.remote = Remote(self)
+        self._webapi = WebApi(self._config, self.request)
 
     def _new_morning(self, config: Config) -> MorningRoutine:
         return MorningRoutine(
@@ -191,13 +193,14 @@ class ControlPanel:
         from a signal handler."""
         self._events.put(event)
 
-    def request(self, name: str, **kwargs: Any) -> Future:
-        """Runs the Remote command `name` on the main thread. Safe from
-        any thread. The Future gets the command's result, or its
-        exception: KeyError for an unknown command, ValueError when the
-        panel refuses it."""
+    def request(self, command: str, **kwargs: Any) -> Future:
+        """Runs the Remote command on the main thread. Safe from any
+        thread. The Future gets the command's result, or its exception:
+        KeyError for an unknown command, ValueError when the panel
+        refuses it. (kwargs may hold a `name`, so the first parameter
+        is not called that.)"""
         future: Future = Future()
-        self._events.put(Command(name, kwargs, future))
+        self._events.put(Command(command, kwargs, future))
         return future
 
     def _run_command(self, cmd: Command) -> None:
@@ -251,9 +254,10 @@ class ControlPanel:
         self._wled_snapshot_at = 0.0
 
     def _components(self) -> list[tuple[str, Component]]:
-        """Components in start order. The job lanes come last so they
-        stop first, before the audio and WLED their jobs use."""
-        return [
+        """Components in start order. The job lanes come late so they
+        stop first, before the audio and WLED their jobs use; the web API
+        comes last so no request arrives while the rest is stopping."""
+        components = [
             ("serial", self._pserial),
             ("wled", self.wled_instance),
             ("audio", self._audioctrl),
@@ -262,6 +266,9 @@ class ControlPanel:
             ("ai jobs", self._ai_jobs),
             ("wled jobs", self._wled_jobs),
         ]
+        if self._config.web_enabled:
+            components.append(("web", self._webapi))
+        return components
 
     def start(self):
         """Starts all components. If one fails to start, the ones
