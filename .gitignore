@@ -30,3 +30,4 @@ lib64
 pyvenv.cfg
 __pycache__/
 wget-log*
+daemon/speech_cache/

@@ -11,6 +11,8 @@ class CEvent:
     is_alarm: bool
     has_time: bool
     """False == all-day event"""
+    end: datetime | None = None
+    """Exclusive. All-day events end at local midnight after their last day."""
 
     def __str__(self) -> str:
         msg = f"{self.summary} {self.descr} "

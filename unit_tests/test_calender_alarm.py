@@ -142,6 +142,38 @@ class TestFetch(CalendarTestCase):
         self.assertEqual([at("2026-10-11 06:45")], cal._alarms)
         self.assertEqual([], cal.todays_events())
 
+    def test_endTimeIsParsed(self):
+        # act
+        cal = self.fetched(
+            {**timed("Football", "2026-10-10 17:00"),
+             "end": {"dateTime": at("2026-10-10 18:30").isoformat()}},
+            {**all_day("Holiday", "2026-10-10"), "end": {"date": "2026-10-13"}},
+        )
+
+        # assert
+        football, holiday = cal.todays_events()
+        self.assertEqual(at("2026-10-10 18:30"), football.end)
+        self.assertEqual(at("2026-10-13 00:00"), holiday.end)
+
+    def test_eventStartedEarlierAndStillGoingOn_isToday(self):
+        # act: a multi-day event that began yesterday
+        cal = self.fetched(
+            {**all_day("Läger", "2026-10-09"), "end": {"date": "2026-10-12"}},
+            {**timed("Over", "2026-10-09 10:00"),
+             "end": {"dateTime": at("2026-10-09 12:00").isoformat()}},
+        )
+
+        # assert
+        self.assertEqual(["Läger"], [e.summary for e in cal.todays_events()])
+
+    def test_alarmWithFarOffEnd_startedBefore_isNoAlarm(self):
+        cal = self.fetched(
+            {**timed("wakeUpAlarm", "2026-01-26 06:45"),
+             "end": {"dateTime": at("2026-12-26 06:45").isoformat()}},
+        )
+        self.assertEqual([], cal._alarms)
+        self.assertEqual([], cal.todays_events())
+
     def test_readsAllPages(self):
         # arrange: the real alarm only on the second page
         pages = [

@@ -16,11 +16,19 @@ import unittest
 import unittest.mock as mock
 
 from daemon.audio_ctrl import SysAudioEvent as aevent
+from daemon.cevent import CEvent
 from daemon.controlpanel_class import ControlPanel, EFFECT_BUTTONS
 from daemon.events import CalendarAlarm, MorningTest, PlaybackChanged
 from daemon.gCalender import TIMEZONE
 from daemon.morning import State
 from daemon.packet import HWEvent, Packet
+
+
+def school_event(hour: int = 9, minute: int = 10) -> CEvent:
+    start = datetime.datetime.now(TIMEZONE).replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
+    return CEvent(start, "Skola", "", None, False, True, start + datetime.timedelta(hours=6))
 
 
 class EventLoopTestCase(unittest.TestCase):
@@ -31,6 +39,8 @@ class EventLoopTestCase(unittest.TestCase):
         cp.wled_instance = mock.Mock()
         cp.ai = mock.Mock()
         cp.cal = mock.Mock()
+        cp.cal.todays_events.return_value = []
+        cp.speech = mock.Mock()
         cp.weather = mock.Mock()
         cp.weather.report.return_value = mock.Mock(facts="FACTS", sentence="SENTENCE")
         for lane in (cp._audio_jobs, cp._ai_jobs, cp._wled_jobs):
@@ -236,7 +246,7 @@ class TestMorningWiring(EventLoopTestCase):
         # arrange
         self.ring()
         self.press(2)
-        self.assertTrue(self.process_until(lambda: self.cp.ai.morningBreifing.called))
+        self.assertTrue(self.process_until(lambda: self.cp.speech.say.called))
 
         # act
         self.press(69)
@@ -245,11 +255,11 @@ class TestMorningWiring(EventLoopTestCase):
         self.assertTrue(
             self.process_until(lambda: self.cp.morning.state == State.DONE, timeout=5)
         )
-        self.cp.ai.morningBreifing.assert_called_once_with(  # prepared, not again
-            self.cp.cal.todays_events.return_value, "FACTS"
+        self.cp.speech.wake_text.assert_called_once_with(  # prepared, not again
+            mock.ANY, "FACTS", school_day=False
         )
         self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
-        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.speech.say.return_value)
         self.cp._audioctrl.volume_override.assert_called_with(False, 70)
 
     def test_aiButtonWhileRinging_dismissesAndPlaysBriefingAtOnce(self):
@@ -267,34 +277,21 @@ class TestMorningWiring(EventLoopTestCase):
         )
         self.cp._audioctrl.play_bytes.assert_called_once()
 
-    def test_briefingFails_readsFallbackText(self):
+    def test_schoolDay_isToldToTheWakeLine(self):
         # arrange
-        self.cp.ai.morningBreifing.side_effect = RuntimeError("no network")
-        self.cp.ai.fallback_briefing.return_value = "God morgon!"
-        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
-            self.ring()
-            self.press(2)
+        self.cp.cal.todays_events.return_value = [school_event()]
+        self.ring()
+        self.press(2)
 
-            # act
-            self.press(69)
-            done = self.process_until(
-                lambda: self.cp.morning.state == State.DONE, timeout=5
-            )
+        # act
+        self.assertTrue(self.process_until(lambda: self.cp.speech.say.called))
 
         # assert
-        self.assertTrue(done)
-        self.cp.ai.fallback_briefing.assert_called_once_with(
-            self.cp.cal.todays_events.return_value, "SENTENCE"
-        )
-        self.cp.ai.speak.assert_called_once_with("God morgon!")
-        self.cp._audioctrl.play_bytes.assert_called_once_with(
-            self.cp.ai.speak.return_value
-        )
+        self.cp.speech.wake_text.assert_called_once_with(mock.ANY, "FACTS", school_day=True)
 
-    def test_everythingFails_onlyTheChimePlays(self):
+    def test_speechFails_onlyTheChimePlays(self):
         # arrange
-        self.cp.ai.morningBreifing.side_effect = RuntimeError("no network")
-        self.cp.ai.speak.side_effect = RuntimeError("no network")
+        self.cp.speech.say.side_effect = RuntimeError("no network")
         with self.assertLogs("daemon.ctrlPanel", "ERROR"):
             self.ring()
             self.press(2)
@@ -413,10 +410,10 @@ class TestAiButton(EventLoopTestCase):
         # assert
         btn.leds[0].blink.assert_called_once_with(forever=True)
         self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
-        self.cp.ai.upcomingEvents.assert_called_once_with(
-            self.cp.cal.todays_events.return_value, "FACTS"
+        self.cp.speech.status_text.assert_called_once_with(
+            mock.ANY, [], None, "FACTS", "SENTENCE"
         )
-        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.speech.say.return_value)
 
     def test_noWeather_asksWithoutIt(self):
         # arrange
@@ -428,9 +425,7 @@ class TestAiButton(EventLoopTestCase):
 
         # assert
         self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
-        self.cp.ai.upcomingEvents.assert_called_once_with(
-            self.cp.cal.todays_events.return_value, ""
-        )
+        self.cp.speech.status_text.assert_called_once_with(mock.ANY, [], None, "", "")
 
     def test_failure_playsFailedAndStopsBlink(self):
         # arrange
@@ -610,6 +605,77 @@ class TestWledButtons(EventLoopTestCase):
             self.process_until(lambda: self.cp.wled_instance.set_wled_state.called)
         )
         self.cp.wled_instance.set_wled_state.assert_called_once_with(False)
+
+
+class TestCheckins(EventLoopTestCase):
+    def test_leaveTime_isSchoolStartMinusTravel(self):
+        # arrange
+        school = school_event(9, 10)
+        self.cp.cal.todays_events.return_value = [school]
+
+        # act / assert
+        self.assertEqual(school.start - datetime.timedelta(minutes=15), self.cp._leave_time())
+
+    def test_leaveTime_noSchool_isNone(self):
+        self.assertIsNone(self.cp._leave_time())
+
+    def test_countdown_cachedTextAtCheckinVolume(self):
+        # act
+        self.cp._play_checkin(15, datetime.datetime.now(TIMEZONE))
+
+        # assert
+        self.cp.speech.cached.assert_called_once_with("15 minuter kvar.")
+        self.cp._audioctrl.sysaudio_play.assert_called_once_with(
+            aevent.CHIME_SPEAK, block=True, volume=60
+        )
+        self.cp._audioctrl.play_bytes.assert_called_once_with(
+            self.cp.speech.cached.return_value, volume=60
+        )
+
+    def test_overview_preparedAudioIsPlayedOnce(self):
+        # arrange
+        leave = datetime.datetime.now(TIMEZONE)
+        self.cp.speech.say.return_value = b"overview"
+        self.cp._prepare_checkins(leave)
+
+        # act
+        self.cp._play_checkin(30, leave)
+
+        # assert: made once, at prepare; the countdown texts are cached then
+        self.cp.speech.overview_text.assert_called_once_with(
+            mock.ANY, [], leave + datetime.timedelta(minutes=15), 30, "FACTS", "SENTENCE"
+        )
+        self.assertEqual(
+            [mock.call("15 minuter kvar."), mock.call("5 minuter kvar. Skor och jacka."),
+             mock.call("Dags att gå. Ha en bra dag!")],
+            self.cp.speech.cached.call_args_list,
+        )
+        self.cp._audioctrl.play_bytes.assert_called_once_with(b"overview", volume=60)
+        self.assertEqual({}, self.cp._overview_audio)
+
+    def test_overviewNotPrepared_isMadeNow(self):
+        # act
+        self.cp._play_checkin(30, datetime.datetime.now(TIMEZONE))
+
+        # assert
+        self.cp.speech.overview_text.assert_called_once()
+        self.cp._audioctrl.play_bytes.assert_called_once_with(
+            self.cp.speech.say.return_value, volume=60
+        )
+
+    def test_speechFails_onlyTheChime(self):
+        # arrange
+        self.cp.speech.cached.side_effect = RuntimeError("no network")
+
+        # act
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.cp._play_checkin(5, datetime.datetime.now(TIMEZONE))
+
+        # assert
+        self.cp._audioctrl.sysaudio_play.assert_called_once_with(
+            aevent.CHIME_SPEAK, block=True, volume=60
+        )
+        self.cp._audioctrl.play_bytes.assert_not_called()
 
 
 if __name__ == "__main__":

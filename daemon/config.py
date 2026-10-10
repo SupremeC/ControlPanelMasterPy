@@ -88,6 +88,39 @@ class Config:
     # An alarm missed by up to this much (daemon restart) still rings.
     late_start_grace_minutes: int = 15
 
+    # Which calendar events are mentioned (daemon/agenda.py). First
+    # guesses, to be tuned: an event that started up to this long ago is
+    # still mentioned, and one that lasts longer than the long-event limit
+    # (or all day) only in the morning, on its first and last day.
+    agenda_started_hours: float = 1
+    agenda_long_event_hours: float = 8
+
+    # School days (daemon/checkins.py). Today's first timed event whose
+    # title starts with school_title (any case) is when school starts;
+    # Axel leaves the travel time before it. Without one, no check-ins.
+    school_title: str = "Skola"
+    school_travel_minutes: float = 15
+    # Spoken this many minutes before leaving; the first one is the
+    # overview of the day, the others are fixed countdown texts.
+    checkin_minutes: tuple[int, ...] = (30, 15, 5, 0)
+    checkin_prepare_lead_minutes: float = 10  # before the overview
+    # A check-in this late (daemon restart, event added late) is skipped.
+    checkin_grace_minutes: float = 2
+    # Check-ins ignore the pot and the master and sound switches.
+    checkin_volume: int = 60
+
+    # Speech (daemon/speech.py): local Swedish templates, the text model
+    # only for the joke and the clothing advice, then text-to-speech. One
+    # voice for everything, also the answers to recorded questions
+    # (gpt-audio), so it must exist for both. The humour style is a key
+    # of speech.STYLES; tools/speech_samples.py lets Axel pick.
+    text_model: str = "gpt-5.5"
+    tts_model: str = "gpt-4o-mini-tts"
+    voice: str = "alloy"
+    humour_style: str = "torr"
+    # Fixed texts (countdown) are synthesised once and kept here.
+    speech_cache_dir: Path = DAEMON_DIR / "speech_cache"
+
     # Weather (SMHI, see daemon/weather.py). Parts of the day in local
     # hours, start to end; a part gets the forecast steps ending after its
     # start and up to its end.

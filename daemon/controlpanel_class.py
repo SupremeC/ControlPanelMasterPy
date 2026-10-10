@@ -29,6 +29,8 @@ from daemon.packet_serial import PacketSerial
 from daemon.openaiWrapper import OpenAiWrapper
 from daemon.gCalender import TIMEZONE, Calender
 from daemon.morning import MorningRoutine, State as MorningState
+from daemon.checkins import Checkins
+from daemon.speech import Speech, countdown_text, school_event
 from daemon import sunrise
 from daemon.weather_service import WeatherReport, WeatherService
 
@@ -47,6 +49,10 @@ MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
 DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
 BRIEFING_RETRY_DELAY = 60  # seconds before a failed briefing is generated again
 MORNING_TEST_LEAD = 120  # seconds from SIGUSR1 to the test alarm
+# The test also runs the check-ins, a tenth of the real offsets, with the
+# leave time this long after the test alarm.
+CHECKIN_TEST_SCALE = 0.1
+CHECKIN_TEST_LEAVE = 8 * 60  # seconds after the test alarm
 WEATHER_FIRST_REFRESH = 30  # seconds after start; then every weather_refresh_minutes
 # Silence between the alarm, the chimes and speech, so they do not melt
 # together. The "off" chime waits for the alarm's fade-out plus the gap.
@@ -75,7 +81,9 @@ class ControlPanel:
 
     The morning routine (daemon/morning.py) gets the calendar's alarm and
     sees every switch input first, even with the master switch off, so
-    the alarm always rings and can always be dismissed.
+    the alarm always rings and can always be dismissed. The check-ins
+    (daemon/checkins.py) speak before leaving for school; what is said
+    comes from daemon/speech.py.
     """
 
     demo_on: bool = False
@@ -117,7 +125,9 @@ class ControlPanel:
         self.ai = OpenAiWrapper(
             key_path=self._config.openai_key_file,
             personal_path=self._config.personal_file,
+            config=self._config,
         )
+        self.speech = Speech(self.ai, self._config)
         self._audioctrl: AudioCtrl = AudioCtrl(
             lambda playing: self._events.put(PlaybackChanged(playing))
         )
@@ -131,6 +141,16 @@ class ControlPanel:
         self._morning_cfg = self._config
         self._real_morning = self._new_morning(self._config)
         self.morning = self._real_morning
+        # Overview audio per leave time; written and read on the AI lane.
+        self._overview_audio: dict[datetime.datetime, bytes] = {}
+        self.checkins = Checkins(
+            _CheckinActions(self),
+            lambda: datetime.datetime.now(TIMEZONE),
+            self.call_later,
+            self._leave_time,
+            self._config,
+        )
+        self._test_checkins: Checkins | None = None
 
     def _new_morning(self, config: Config) -> MorningRoutine:
         return MorningRoutine(
@@ -169,6 +189,7 @@ class ControlPanel:
             self._components_stack = stack.pop_all()
         self.reset()
         self._real_morning.start()
+        self.checkins.start()
         self.call_later(WEATHER_FIRST_REFRESH, self._weather_refresh)
 
     def stop(self):
@@ -227,6 +248,7 @@ class ControlPanel:
         self._resync_if_needed()
         self._demo_step()
         self._end_morning_test_if_done()
+        self._end_checkin_test_if_done()
         if self.time_to_send_hello():
             self._pserial.send_hello()
             self._last_sent_hello = datetime.datetime.now()
@@ -645,6 +667,25 @@ class ControlPanel:
         self.morning = self._new_morning(test_cfg)
         self.morning.start()
         self.morning.set_alarm(alarm)
+        if self._test_checkins is None:
+            leave = alarm + datetime.timedelta(seconds=CHECKIN_TEST_LEAVE)
+            logger.info("check-in test: leave at %s, times compressed", f"{leave:%H:%M:%S}")
+            self._test_checkins = Checkins(
+                _CheckinActions(self),
+                lambda: datetime.datetime.now(TIMEZONE),
+                self.call_later,
+                lambda: leave,
+                cfg,
+                scale=CHECKIN_TEST_SCALE,
+            )
+            self._test_checkins.start()
+
+    def _end_checkin_test_if_done(self) -> None:
+        test = self._test_checkins
+        if test is not None and test.leave is not None and test.finished():
+            test.stop()
+            self._test_checkins = None
+            logger.info("check-in test: finished")
 
     def _end_morning_test_if_done(self) -> None:
         test = self.morning
@@ -679,28 +720,55 @@ class ControlPanel:
             logger.info("Weather facts:\n%s", report.facts)
         return report
 
+    def _leave_time(self) -> datetime.datetime | None:
+        """Today's leave time: the school event minus the travel time, from
+        the last fetch. None without a school event."""
+        cfg = self._config
+        today = datetime.datetime.now(TIMEZONE).date()
+        school = school_event(self.cal.todays_events(), today, cfg.school_title)
+        if school is None:
+            return None
+        return school.start - datetime.timedelta(minutes=cfg.school_travel_minutes)
+
+    def _weather_parts(self) -> tuple[str, str]:
+        """(facts for the text model, sentence for the template)."""
+        report = self._weather_report()
+        return (report.facts, report.sentence) if report else ("", "")
+
     def _tell_upcoming_events(self) -> None:
         self.cal.fetch()
-        report = self._weather_report()
-        self.ai.upcomingEvents(self.cal.todays_events(), report.facts if report else "")
-        self._audioctrl.play_bytes(self.ai.audio)
+        facts, sentence = self._weather_parts()
+        text = self.speech.status_text(
+            datetime.datetime.now(TIMEZONE),
+            self.cal.todays_events(),
+            self._leave_time(),
+            facts,
+            sentence,
+        )
+        self._audioctrl.play_bytes(self.speech.say(text))
 
     def _generate_briefing(self) -> bytes:
+        """The wake line. Without the text model it is the template
+        without the joke; it raises only when speech fails."""
         self.cal.fetch()
-        report = self._weather_report()
-        self.ai.morningBreifing(self.cal.todays_events(), report.facts if report else "")
-        return self.ai.audio
+        facts, _ = self._weather_parts()
+        text = self.speech.wake_text(
+            datetime.datetime.now(TIMEZONE), facts, school_day=self._leave_time() is not None
+        )
+        return self.speech.say(text, self.speech.wake_voice())
 
     def _prepare_briefing(self) -> None:
         self._briefing_audio = None
         self._briefing_audio = self._generate_briefing()
 
     def _play_briefing(self) -> None:
-        """The prepared briefing, else one made now, else a fixed text
-        read aloud, else only the chime."""
+        """The prepared wake line, else one made now, else only the chime."""
         audio, self._briefing_audio = self._briefing_audio, None
         if audio is None:
-            audio = self._briefing_or_fallback()
+            try:
+                audio = self._generate_briefing()
+            except Exception:
+                logger.exception("Briefing failed. Only the chime plays")
         # The "off" chime may still be due (OFF_CHIME_DELAY) or playing.
         time.sleep(OFF_CHIME_DELAY + 0.2)
         self._audioctrl.wait_until_quiet()
@@ -711,20 +779,47 @@ class ControlPanel:
         time.sleep(CHIME_GAP)
         self._audioctrl.play_bytes(audio)
 
-    def _briefing_or_fallback(self) -> bytes | None:
+    # ---- check-ins (AI lane) ----------------------------------------------
+
+    def _overview(self, leave: datetime.datetime) -> bytes:
+        self.cal.fetch()
+        facts, sentence = self._weather_parts()
+        cfg = self._config
+        text = self.speech.overview_text(
+            datetime.datetime.now(TIMEZONE),
+            self.cal.todays_events(),
+            leave + datetime.timedelta(minutes=cfg.school_travel_minutes),
+            max(cfg.checkin_minutes),
+            facts,
+            sentence,
+        )
+        return self.speech.say(text)
+
+    def _prepare_checkins(self, leave: datetime.datetime) -> None:
+        """The overview, and the countdown texts into the disk cache."""
+        self._overview_audio = {leave: self._overview(leave)}
+        for minutes in self._config.checkin_minutes[1:]:
+            self.speech.cached(countdown_text(minutes))
+
+    def _play_checkin(self, minutes: int, leave: datetime.datetime) -> None:
+        """Chime, then the overview (first check-in) or a countdown text,
+        at checkin_volume whatever the switches say. Only the chime when
+        there is no speech."""
+        volume = self._config.checkin_volume
+        audio = None
         try:
-            return self._generate_briefing()
+            if minutes == max(self._config.checkin_minutes):
+                audio = self._overview_audio.pop(leave, None) or self._overview(leave)
+            else:
+                audio = self.speech.cached(countdown_text(minutes))
         except Exception:
-            logger.exception("Briefing failed. Reading the fallback text")
-        try:
-            report = self.weather.report()  # cached unless SMHI failed
-            sentence = report.sentence if report else ""
-            return self.ai.speak(
-                self.ai.fallback_briefing(self.cal.todays_events(), sentence)
-            )
-        except Exception:
-            logger.exception("Fallback briefing failed. Only the chime plays")
-        return None
+            logger.exception("Check-in speech failed. Only the chime plays")
+        self._audioctrl.wait_until_quiet()
+        self._audioctrl.sysaudio_play(aevent.CHIME_SPEAK, block=True, volume=volume)
+        if audio is None:
+            return
+        time.sleep(CHIME_GAP)
+        self._audioctrl.play_bytes(audio, volume=volume)
 
     def speakerLeds(self, on: bool) -> None:
         if on:
@@ -893,6 +988,26 @@ class _MorningActions:
 
     def briefing_play(self) -> None:
         self._cp._briefing_play()
+
+
+class _CheckinActions:
+    """Checkins' Actions (see daemon/checkins.py): the speech is made and
+    played on the AI lane, after any job already there."""
+
+    def __init__(self, cp: ControlPanel):
+        self._cp = cp
+
+    def checkin_prepare(self, leave: datetime.datetime) -> None:
+        cp = self._cp
+        # Quietly: the check-in itself makes the overview again if needed.
+        cp._run_job(
+            cp._ai_jobs, "checkin-prepare", cp._prepare_checkins, leave,
+            on_error=lambda _error: None,
+        )
+
+    def checkin_play(self, minutes: int, leave: datetime.datetime) -> None:
+        cp = self._cp
+        cp._run_job(cp._ai_jobs, "checkin", cp._play_checkin, minutes, leave)
 
 
 if __name__ == "__main__":

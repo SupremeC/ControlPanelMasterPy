@@ -210,13 +210,15 @@ class AudioCtrl:
         except OSError as e:
             logger.exception(e)
 
-    def play_bytes(self, p_bytes: bytes) -> None:
+    def play_bytes(self, p_bytes: bytes, volume: int | None = None) -> None:
         """Blocking: plays MP3 data with ffplay until it ends. ffplay is what
         pydub used here too, but pydub let it print its progress to the
-        journal. Full volume, except at the override level while the
-        override is on."""
+        journal. At `volume` (percent) if given, else full volume, except
+        at the override level while the override is on."""
         cmd = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error"]
-        if self._override_volume is not None:
+        if volume is not None:
+            cmd += ["-volume", str(AudioCtrl.__clamp(volume, 0, 100))]
+        elif self._override_volume is not None:
             cmd += ["-volume", str(round(self._override_volume * 100))]
         subprocess.run(
             cmd + ["-i", "pipe:0"],
@@ -265,9 +267,12 @@ class AudioCtrl:
         event: SysAudioEvent = SysAudioEvent.NONE_,
         block: bool = False,
         repeat: int = 0,
+        volume: int | None = None,
     ) -> None:
-        """PLays built-in sound. See folder 'systemsounds'"""
-        if self.get_volume() <= 0:
+        """PLays built-in sound. See folder 'systemsounds'. At `volume`
+        (percent) if given, whatever the pot and switches say."""
+        level = self.get_volume() if volume is None else AudioCtrl.__clamp(volume, 0, 100) / 100
+        if level <= 0:
             return
         if event is None or event == SysAudioEvent.NONE_:
             return
@@ -282,7 +287,7 @@ class AudioCtrl:
             )
             return
         sound = mixer.Sound(self.systemsounds[key])
-        sound.set_volume(self.get_volume())
+        sound.set_volume(level)
         mixer.find_channel(force=True).play(sound, loops=repeat)
         if block:
             while mixer.get_busy():

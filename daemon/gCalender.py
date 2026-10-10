@@ -29,6 +29,14 @@ def _local_midnight(day: datetime.date) -> datetime.datetime:
     return TIMEZONE.localize(datetime.datetime.combine(day, datetime.time()))
 
 
+def _overlaps(event: CEvent, moment: datetime.datetime) -> bool:
+    """Starts at or after moment, or is still going on at moment. An
+    event without an end time counts only from its start."""
+    if event.start >= moment:
+        return True
+    return event.end is not None and event.end > moment
+
+
 def _next_at(now: datetime.datetime, at: datetime.time) -> datetime.datetime:
     """The first local time `at` after now."""
     due = TIMEZONE.localize(datetime.datetime.combine(now.date(), at))
@@ -109,9 +117,16 @@ class Calender:
         self.cal_updater_thread = None
 
     def todays_events(self) -> List[CEvent]:
-        """Today's events from the last fetch, alarms left out."""
+        """Events from the last fetch that take place today, also those
+        that started earlier and have not ended. Alarms left out.
+        daemon/agenda.py decides which of them are worth mentioning."""
         today = self._now().date()
-        return [e for e in self._events if e.start.date() == today]
+        midnight = _local_midnight(today)
+        return [
+            e
+            for e in self._events
+            if e.start.date() == today or (e.start < midnight and _overlaps(e, midnight))
+        ]
 
     def next_alarm(
         self, not_before: datetime.datetime | None = None
@@ -178,13 +193,15 @@ class Calender:
             except HttpError as error:
                 logger.error("Fetching calendar events failed: %s", error)
                 return False
-            events = [
-                e
-                for e in map(self._parse_event, items)
-                if e is not None and e.start >= window_start
+            events = [e for e in map(self._parse_event, items) if e is not None]
+            # Events that started before the window are kept while they
+            # last (multi-day, ongoing); alarms only count from today.
+            self._events = [
+                e for e in events if not e.is_alarm and _overlaps(e, window_start)
             ]
-            self._events = [e for e in events if not e.is_alarm]
-            self._alarms = sorted(e.start for e in events if e.is_alarm)
+            self._alarms = sorted(
+                e.start for e in events if e.is_alarm and e.start >= window_start
+            )
             logger.info(
                 "downloaded %d calendar events, alarms: %s",
                 len(self._events),
@@ -231,6 +248,10 @@ class Calender:
         if start is None:
             return None
         summary = event.get("summary", "")
+        end_info = event.get("end") or {}
+        end, _ = Calender.parse_event_date(
+            end_info.get("dateTime") or end_info.get("date")
+        )
         return CEvent(
             start=start,
             summary=summary,
@@ -239,6 +260,7 @@ class Calender:
             # An all-day event cannot wake anyone.
             is_alarm=has_time and summary.strip().casefold() == self._alarm_title,
             has_time=has_time,
+            end=end,
         )
 
     def refresh_tokens(self) -> bool:

@@ -323,6 +323,7 @@ class TestControlPanelLifecycle(unittest.TestCase):
             fake.start.side_effect = lambda n=name: calls.append(f"{n}.start")
             fake.stop.side_effect = lambda n=name: calls.append(f"{n}.stop")
             setattr(cp, attr, fake)
+        cp.cal.todays_events.return_value = []
         return cp, calls
 
     def test_constructor_opensNothing(self, mock_serial, mock_comports, mock_mixer):

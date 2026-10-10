@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""personal.json (name, birthday, computed age) and the Swedish prompts
-built from it. No network: the prompts are only built, never sent.
+"""personal.json (name, birthday, computed age, bring rules) and the
+OpenAI wrapper. No network: the client is a mock.
 """
 
 import datetime
@@ -10,22 +10,11 @@ import tempfile
 import unittest
 import unittest.mock as mock
 
-from daemon.cevent import CEvent
+from daemon.config import Config
 from daemon.openaiWrapper import OpenAiWrapper
 from daemon.personal import Personal, swedish_date
 
 BIRTHDAY = datetime.date(2014, 6, 30)
-
-
-def event(summary: str, start: datetime.datetime | None = None, **kw) -> CEvent:
-    return CEvent(
-        start=start or datetime.datetime(2026, 10, 12),
-        summary=summary,
-        descr="",
-        location=kw.get("location"),
-        is_alarm=False,
-        has_time=start is not None,
-    )
 
 
 class TestPersonal(unittest.TestCase):
@@ -87,102 +76,112 @@ class TestPersonal(unittest.TestCase):
         self.assertEqual("måndag 12 oktober", swedish_date(datetime.date(2026, 10, 12)))
 
 
-class PromptTestCase(unittest.TestCase):
+class TestBring(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "personal.json"
+
+    def load(self, bring) -> Personal:
+        self.path.write_text(json.dumps({"name": "Kim", "bring": bring}), encoding="utf-8")
+        return Personal.load(self.path)
+
+    def test_weekdayRules_onlyOnSchoolDays(self):
+        p = self.load({"weekdays": {"Tisdag": ["gympapåsen"]}})
+        tuesday = datetime.date(2026, 10, 13)
+        self.assertEqual(["gympapåsen"], p.things_to_bring(tuesday, [], school_day=True))
+        self.assertEqual([], p.things_to_bring(tuesday, [], school_day=False))
+        self.assertEqual([], p.things_to_bring(tuesday + datetime.timedelta(days=1), [], True))
+
+    def test_keywordRules_matchTitlesAnyCase(self):
+        p = self.load({"keywords": {"Scout": "scoutskjortan"}})
+        day = datetime.date(2026, 10, 13)
+        self.assertEqual(["scoutskjortan"], p.things_to_bring(day, ["SCOUTMÖTE"], False))
+        self.assertEqual([], p.things_to_bring(day, ["Fotboll"], False))
+
+    def test_eachThingOnce(self):
+        p = self.load({
+            "weekdays": {"tisdag": ["gympapåsen"]},
+            "keywords": {"idrott": ["gympapåsen", "vattenflaska"]},
+        })
+        self.assertEqual(
+            ["gympapåsen", "vattenflaska"],
+            p.things_to_bring(datetime.date(2026, 10, 13), ["Idrottsdag"], True),
+        )
+
+    def test_unknownWeekday_isLoggedAndSkipped(self):
+        with self.assertLogs("daemon.personal", "ERROR"):
+            p = self.load({"weekdays": {"tisdagar": ["x"], "onsdag": ["y"]}})
+        self.assertEqual(["y"], p.things_to_bring(datetime.date(2026, 10, 14), [], True))
+
+    def test_brokenRules_areIgnored_restWorks(self):
+        with self.assertLogs("daemon.personal", "ERROR"):
+            p = self.load(["gympapåsen"])
+        self.assertEqual("Kim", p.name)
+        self.assertEqual([], p.things_to_bring(datetime.date(2026, 10, 13), [], True))
+
+    def test_exampleFile_hasRules(self):
+        example = Path(__file__).resolve().parent.parent / "daemon" / "personal.example.json"
+        p = Personal.load(example)
+        self.assertEqual(
+            ["gympapåsen", "scoutskjortan"],
+            p.things_to_bring(datetime.date(2026, 10, 13), ["Scoutmöte"], True),
+        )
+
+
+class TestOpenAiWrapper(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / "personal.json"
         path.write_text(json.dumps({"name": "Kim", "birthday": "2014-06-30"}))
-        self.ai = OpenAiWrapper(key_path=Path("/nonexistent"), personal_path=path)
-        self.events = [
-            event("Skola", datetime.datetime(2026, 10, 12, 8, 10), location="Skolan"),
-            event("Studiedag"),
-        ]
-
-
-class TestPrompts(PromptTestCase):
-    def test_morning_requestIsInTheUserMessage(self):
-        # act
-        system, user = self.ai._morning_instr("Weather today is cloudy", self.events)
-
-        # assert: the old wording made gpt-audio-1.5 refuse (#16)
-        self.assertNotIn("system instructions", user["content"])
-        self.assertIn("morgonbesked", user["content"])
-        self.assertIn("- 08:10: Skola (Skolan)", user["content"])
-        self.assertIn("- hela dagen: Studiedag", user["content"])
-        self.assertIn("Weather today is cloudy", user["content"])
-
-    def test_system_isSwedishWithNameAndComputedAge(self):
-        # act
-        system, _ = self.ai._morning_instr("", [])
-
-        # assert
-        age = Personal("Kim", BIRTHDAY).age(datetime.date.today())
-        self.assertIn(f"Du pratar med Kim, {age} år, som bor i Stockholm", system["content"])
-        self.assertIn("Svara alltid på svenska", system["content"])
-
-    def test_noWeather_isNotMentioned(self):
-        _, user = self.ai._morning_instr("", [])
-        self.assertNotIn("väder", user["content"].lower())
-        self.assertIn("4. Avsluta med något uppmuntrande.", user["content"])
-        self.assertIn("- inga", user["content"])
-
-    def test_weather_isAStepWithClothes(self):
-        _, user = self.ai._morning_instr("Väder idag, måndag 12 oktober:\n- Morgon", [])
-        self.assertIn(
-            "3. Berätta kort om vädret och vad det betyder för vilka kläder jag ska ha.",
-            user["content"],
+        self.ai = OpenAiWrapper(
+            key_path=Path("/nonexistent"), personal_path=path, config=Config(voice="marin")
         )
-        self.assertIn("\n\nVäder idag, måndag 12 oktober:\n- Morgon\n\nDagens händelser:",
-                      user["content"])
-        self.assertNotIn("engelska", user["content"])
-
-    def test_events_requestIsInTheUserMessage(self):
-        _, user = self.ai._events_instr("", self.events)
-        self.assertIn("Vad händer idag?", user["content"])
-        self.assertNotIn("vädret", user["content"])
-
-    def test_events_withWeather(self):
-        _, user = self.ai._events_instr("Väder ikväll", self.events)
-        self.assertIn("berätta kort om vädret och vad det betyder för kläderna, ",
-                      user["content"])
-        self.assertIn("Väder ikväll\n\nDagens händelser:", user["content"])
+        self.ai._client = mock.MagicMock()
 
     def test_recordedQuestion_swedishSystemThenAudio(self):
         system, user = self.ai.build_audio_instr("d2F2")
         self.assertIn("svenska", system["content"])
+        age = Personal("Kim", BIRTHDAY).age(datetime.date.today())
+        self.assertIn(f"Du pratar med Kim, {age} år,", system["content"])
         self.assertEqual("input_audio", user["content"][0]["type"])
 
-
-class TestFallback(PromptTestCase):
-    def test_greetsTimeAndFirstTimedEvent(self):
-        text = self.ai.fallback_briefing(self.events)
-        self.assertTrue(text.startswith("God morgon Kim! Klockan är "))
-        self.assertIn("Idag börjar det med Skola klockan 08:10.", text)
-
-    def test_noEvents(self):
-        self.assertIn("Jag hittar inget i kalendern idag.", self.ai.fallback_briefing([]))
-
-    def test_weatherSentenceAfterTheTime(self):
-        text = self.ai.fallback_briefing(self.events, "Idag blir det 7 grader.")
-        self.assertRegex(text, r"Klockan är \d\d:\d\d\. Idag blir det 7 grader\. Idag börjar")
-
-    def test_speak_usesTtsAndStoresAudio(self):
+    def test_speak_usesTtsWithTheConfiguredVoice(self):
         # arrange
-        client = mock.Mock()
-        client.audio.speech.create.return_value.read.return_value = b"mp3"
-        self.ai._client = client
+        self.ai._client.audio.speech.create.return_value.read.return_value = b"mp3"
 
         # act
-        audio = self.ai.speak("Hej")
+        audio = self.ai.speak("Hej", "Tala lugnt.")
 
         # assert
         self.assertEqual(b"mp3", audio)
         self.assertEqual(b"mp3", self.ai.audio)
-        kwargs = client.audio.speech.create.call_args.kwargs
+        kwargs = self.ai._client.audio.speech.create.call_args.kwargs
         self.assertEqual("Hej", kwargs["input"])
+        self.assertEqual("marin", kwargs["voice"])
+        self.assertEqual("Tala lugnt.", kwargs["instructions"])
         self.assertEqual("mp3", kwargs["response_format"])
 
+    def test_chatJson_parsesTheObject(self):
+        # arrange
+        create = self.ai._client.chat.completions.create
+        create.return_value.choices[0].message.content = '{"skamt": "Hej"}'
+
+        # act
+        reply = self.ai.chat_json("system", "user", "medium")
+
+        # assert
+        self.assertEqual({"skamt": "Hej"}, reply)
+        kwargs = create.call_args.kwargs
+        self.assertEqual({"type": "json_object"}, kwargs["response_format"])
+        self.assertEqual("medium", kwargs["reasoning_effort"])
+
+    def test_chatJson_notAnObject_raises(self):
+        create = self.ai._client.chat.completions.create
+        create.return_value.choices[0].message.content = '["Hej"]'
+        with self.assertRaises(ValueError):
+            self.ai.chat_json("system", "user")
 
 if __name__ == "__main__":
     unittest.main()

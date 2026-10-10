@@ -57,6 +57,7 @@ class TestControlPanelWithFakeSerial(unittest.TestCase):
         cp._audioctrl = mock.Mock()
         cp.wled_instance = mock.Mock()
         cp.cal = mock.Mock()
+        cp.cal.todays_events.return_value = []
         cp.weather = mock.Mock()
         cp.start()
         self.addCleanup(cp.stop)
