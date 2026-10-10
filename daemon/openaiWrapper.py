@@ -6,8 +6,11 @@ from .cevent import CEvent
 from .smhi import SMHI
 
 
-
 logger = logging.getLogger("daemon.openaiWrapper")
+
+# gpt-4o-audio-preview was retired (404 model_not_found since Sep 2026).
+# gpt-audio-1.5 is OpenAI's named successor for the gpt-4o-audio / gpt-audio line.
+OPENAI_AUDIO_MODEL = "gpt-audio-1.5"
 
 
 class OpenAiWrapper:
@@ -16,8 +19,7 @@ class OpenAiWrapper:
     - account: myOwnEmail
 
     #### private key token:
-    - Stored in session variable.
-    - Loaded via /etc/profile. see 'sudo nano /etc/profile'
+    - Read from daemon/cpanel-openai-service-account.secretkey (gitignored)
     """
 
     busy: bool = False
@@ -89,7 +91,7 @@ class OpenAiWrapper:
         self.busy = True
         self.audio = None
         completion = self.client.chat.completions.create(
-            model="gpt-4o-audio-preview",
+            model=OPENAI_AUDIO_MODEL,
             modalities=["text", "audio"],
             audio={"voice": "alloy", "format": "mp3"},
             messages=OpenAiWrapper.build_audio_instr(audio),
@@ -102,7 +104,7 @@ class OpenAiWrapper:
         self.audio = None
         completion = None
         completion = self.client.chat.completions.create(
-            model="gpt-4o-audio-preview",
+            model=OPENAI_AUDIO_MODEL,
             modalities=["text", "audio"],
             audio={"voice": "alloy", "format": "mp3"},
             messages=convo_arr,
