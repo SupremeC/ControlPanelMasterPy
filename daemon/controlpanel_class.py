@@ -7,7 +7,7 @@ import random
 import threading
 import time
 from typing import List
-from Pyro5.api import expose
+
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
 from .pyro_daemon import PyroDaemon
@@ -24,7 +24,7 @@ logger = logging.getLogger("daemon.ctrlPanel")
 # 256 / 10bytes => 25 packets until buffer is full.
 # average arduino loop duration is ~25ms. In theory, that allows us
 # to send (1000/25ms)*25packets = 1000 packets per second.
-MAX_PACKETS_IN_SEND_QUEUE = 100
+MAX_PACKETS_IN_SEND_QUEUE = 50
 SEND_HELLO_INTERVALL = 120  # seconds
 
 
@@ -45,6 +45,7 @@ class ControlPanel:
         )
         self.demo_on: bool = False
         self.alarm_on: bool = False
+        self.btnLeds: bool = True
         self.cal = Calender(self.on_cal_alarm, self.on_cal_sunrise)
         self.ai = OpenAiWrapper()
         self._audioctrl: AudioCtrl = AudioCtrl(self.speakerLeds)
@@ -77,6 +78,7 @@ class ControlPanel:
             self._pserial.close_connection()
             self.pyrodaemon.stop()
             self.wled_instance.close_serial_conn()
+            self.cal.stop()
         except Exception as e:
             logger.error(e)
 
@@ -156,7 +158,9 @@ class ControlPanel:
             if self.alarm_on and packet.target not in range(54, 63):  # analog ctrls
                 self.alarm_on = False
                 self._audioctrl.stop_alarm()
-                self.ai_talk
+                time.sleep(5)
+                self.ai.morningBreifing(self.cal.get_todays_events())
+                self._audioctrl.play_bytes(self.ai.audio)
                 return
 
             if not mastersw.state or not inputsw.state:
@@ -176,6 +180,9 @@ class ControlPanel:
                 return
             if packet.target >= 2 and packet.target <= 11 and packet.val == 200:
                 # Restore Audio OR Demo
+                if packet.target == 3:
+                    self.btnLeds = not self.btnLeds
+                    self.send_packets(self._ctrls.set_all_leds(self.btnLeds))
                 if packet.target == 5:
                     self.demo_on = not self.demo_on
                     if self.demo_on:
@@ -223,7 +230,7 @@ class ControlPanel:
             if packet.target >= 38 and packet.target <= 41:
                 self._set_relays(packet, is_safetyctrl=True)
                 return
-            if packet.target >= 52 and packet.target <= 59:  # ledtrip_analog
+            if packet.target >= 54 and packet.target <= 61:  # ledtrip_analog
                 # analog controls (A0 == 52, A1=53, ...)
                 self.ledstrip_control(packet)
                 return
@@ -334,11 +341,11 @@ class ControlPanel:
             raise
 
     def ai_talk(self, p_btn, p_audio_call: bool) -> None:
-        ai_thread = threading.Thread(
+        self.ai_thread = threading.Thread(
             target=self.wrapped_ai_talk,
             kwargs=dict(btn=p_btn, audio_call=p_audio_call),
         )
-        ai_thread.start()
+        self.ai_thread.start()
 
     def wrapped_ai_talk(self, btn, audio_call: bool) -> None:
         try:
@@ -350,13 +357,18 @@ class ControlPanel:
                 self.ai._send_audio_chat(audio_str)
                 self._audioctrl.play_bytes(self.ai.audio)
                 self.send_packets(btn.leds[0].blink_stop())
+                self.ai.busy = False
             else:
+                # Load events from google calender and create morning breifing text with openAI, then play it.
                 self.send_packets(btn.leds[0].blink(forever=True))
                 self.ai.upcomingEvents(self.cal.get_todays_events())
                 self._audioctrl.play_bytes(self.ai.audio)
                 self.send_packets(btn.leds[0].blink_stop())
+                self.ai.busy = False
         except Exception as e:
-            self.sysaudio_play(aevent.FAILED)
+            self.ai.busy = False
+            self._audioctrl.sysaudio_play(aevent.FAILED)
+            self.send_packets(btn.leds[0].blink_stop())
             logger.error(e)
 
     def speakerLeds(self, on: bool) -> None:
@@ -368,8 +380,6 @@ class ControlPanel:
     def on_cal_alarm(self) -> None:
         self.alarm_on = True
         self._audioctrl.sysaudio_play(aevent.ALARM, False, 20)
-        # sleep 5
-        # Play ai morning greeting?
         pass
 
     def on_cal_sunrise(self, duration: int) -> None:
@@ -377,8 +387,9 @@ class ControlPanel:
 
     def ledstrip_control(self, packet: Packet):
         """Sends commands (translated from packet) to LED-strip"""
-        if packet.target == 35:  # on/off/reset
-            segmentId = 1
+        segmentId = 0 if packet.target in [32, 33, 34, 58, 59, 60, 61] else 1
+
+        if packet.target in [32, 35]:  # on/off/reset
             if packet.val == 100:
                 self.wled_instance._change_effect(0, segmentId)
                 return
@@ -387,22 +398,34 @@ class ControlPanel:
             )
             led_ctrl = self._ctrls.get_ctrl(packet.target)
             self.send_packets(led_ctrl.set_state(not segment_state))
-            # self.send_packets(led_ctrl.set_state(True))
             self.wled_instance.toggle_wled_state(segmentId)
+            return
 
-        if packet.target == 36:
-            self.wled_instance.previous_effect(1)
-        if packet.target == 37:
-            self.wled_instance.next_effect(1)
-        if packet.target == 55:
-            self.wled_instance.set_brightness(self.map_value(packet.val), 1)
-        if packet.target >= 54 and packet.target <= 57:
+        if packet.target in [34, 36]:
+            self.wled_instance.previous_effect(segmentId)
+            return
+        if packet.target in [33, 37]:
+            self.wled_instance.next_effect(segmentId)
+            return
+        if packet.target in [55, 58]:
+            self.wled_instance.set_brightness(self.map_value(packet.val), segmentId)
+            return
+        if packet.target in (54, 56, 57):
             self._ctrls.get_ctrl(packet.target).set_state(self.map_value(packet.val))
             red_ctrl = self._ctrls.get_ctrl(54)
             green_ctrl = self._ctrls.get_ctrl(56)
             blue_ctrl = self._ctrls.get_ctrl(57)
             color = [red_ctrl.state, green_ctrl.state, blue_ctrl.state]
-            self.wled_instance.set_color(color, 1)
+            self.wled_instance.set_color(color, segmentId)
+            return
+        if packet.target in (59, 60, 61):
+            self._ctrls.get_ctrl(packet.target).set_state(self.map_value(packet.val))
+            red_ctrl = self._ctrls.get_ctrl(59)
+            green_ctrl = self._ctrls.get_ctrl(60)
+            blue_ctrl = self._ctrls.get_ctrl(61)
+            color = [red_ctrl.state, green_ctrl.state, blue_ctrl.state]
+            self.wled_instance.set_color(color, segmentId)
+            return
 
     def map_value(self, val, in_min=0, in_max=1023, out_min=0, out_max=255):
         # Ensure value is within the input range
@@ -474,77 +497,6 @@ class ControlPanel:
             logger.debug("SendQueue is now cleared.")
         else:
             logger.debug("SendQueue is empty. Good")
-
-    # ==============================================
-    # ========== PURO EXPOSED METHODS ==============
-    # ==============================================
-
-    @expose
-    def say_hello(self) -> str:
-        """Pyro exposed function"""
-        return "Well hello there stranger! I'm ControlPanelDaemon"
-
-    @expose
-    def get_status(self) -> str:
-        """Pyro exposed function"""
-        status = {}
-        status.update({"Read Queue": self._packet_receivedqueue.qsize()})
-        status.update({"Send Queue": self._packet_sendqueue.qsize()})
-        status.update(
-            {
-                "Last Sent Hello": (
-                    "-"
-                    if self._last_sent_hello is None
-                    else self._last_sent_hello.isoformat()
-                )
-            }
-        )
-        status.update(
-            {
-                "Last Incoming Hello": (
-                    "-"
-                    if self._last_received_hello is None
-                    else self._last_received_hello.isoformat()
-                )
-            }
-        )
-        status.update({"Volume": "TODO"})
-        status.update(
-            {
-                "Main Switch": self._bool_to_onoffstr(
-                    self._ctrls.get_ctrl_by_name("masterSw").state
-                )
-            }
-        )
-        status.update(
-            {
-                "Inputs Switch": self._bool_to_onoffstr(
-                    self._ctrls.get_ctrl_by_name("InputsSw").state
-                )
-            }
-        )
-        status.update(
-            {
-                "Sound Switch": self._bool_to_onoffstr(
-                    self._ctrls.get_ctrl_by_name("SoundSw").state
-                )
-            }
-        )
-        return status
-
-    @expose
-    def get_latest_rpackets(self) -> List[Packet]:
-        """The last X RECEIVED packets"""
-        return self._pserial.last_received
-
-    @expose
-    def get_latest_spackets(self) -> List[Packet]:
-        """The last X SENT packets"""
-        return self._pserial.last_sent
-
-    @staticmethod
-    def _bool_to_onoffstr(b: bool) -> str:
-        return "ON" if b else "OFF"
 
 
 if __name__ == "__main__":

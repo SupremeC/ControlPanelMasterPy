@@ -28,6 +28,7 @@ Related links:
 
 
 # pylint: disable=W0611
+import signal
 import sys
 import time
 import logging
@@ -46,21 +47,31 @@ class MyDaemon(DaemonSC):
 
     _control_panel: ControlPanel
 
-    def run(self):
-        logger.info("Hello from run(). Process ID:%s", str(os.getpid()))
-        self._control_panel = ControlPanel()
-        self._control_panel.start()
-        logger.debug("Daemon run.init complete")
-        while not self.kill_now:
-            self._control_panel.process()
-            time.sleep(0.1)
-        logger.debug("exiting run() method")
-        self._control_panel.stop()
+    def __init__(self, pid):
+        logger.debug("MyDaemon.__init__()")
+        super().__init__(pid)
 
-    def cleanup(self, signum, signame):
-        logger.info("cleanup.Process ID:%s", str(os.getpid()))
+    def run(self):
+        try:
+            logger.info("Hello from run(). Process ID:%s", str(os.getpid()))
+            self._control_panel = ControlPanel()
+            self._control_panel.start()
+            logger.debug("Daemon run.init complete")
+            while not self.kill_now:
+                self._control_panel.process()
+                time.sleep(0.1)
+            logger.debug("exiting run() method")
+            self._control_panel.stop()
+        except Exception as x:
+            logger.error(x)
+        logger.info("run() Exiting")
+
+    def cleanup(self, signum):
+        signame = signal.Signals(signum).name
+        logger.info("cleanup() Process ID:%s", str(os.getpid()))
         logger.info("Cleaning up because %s(%d) was received", signame, signum)
         self._control_panel.stop()
+        logger.info("cleanup() Done cleaning.")
 
 
 if __name__ == "__main__":

@@ -73,6 +73,7 @@ class AudioRec:
         filename = self.__dir.joinpath(filename)
         # filename = tempfile.mktemp(prefix="tmp_rec", suffix=".wav", dir=self.__dir)
         if self.audio_q.qsize() != 0:
+            self.audio_q = queue.Queue()
             logger.warning("WARNING: req.Queue not empty!")
         self.thread = threading.Thread(
             target=self.file_writing_thread,
@@ -93,7 +94,10 @@ class AudioRec:
         """Stops recording process. Might take a while (blocking)..."""
         self.recording = False  # important!
         if self.stream is not None:
-            self.stream.stop()
+            elapsed_time = time.time() - self.recordingstart
+            if elapsed_time < 2:
+                time.sleep(2 - elapsed_time)
+            self.stream.stop(True)
             self._wait_for_thread()
 
     def set_device(self, dev_id: int) -> None:
@@ -143,7 +147,7 @@ class AudioRec:
         #     can use Python's open() function (with the "buffering" argument) and
         #     pass the resulting file object to sf.SoundFile().
         with sf.SoundFile(**soundfile_args) as f:
-            while True:
+            while self.recording:
                 data = q.get()
                 if (
                     data is None
@@ -190,7 +194,11 @@ class AudioRec:
     def _wait_for_thread(self):
         """blocking"""
         if self.thread is not None and self.thread.is_alive():
-            self.thread.join()
+            self.thread.join(1)
+        if not self.stream.stopped:
+            self.stream.stop()
+        if not self.stream.closed:
+            self.stream.close()
 
     @staticmethod
     def __build_tmp_filename(uprefix: str = None, suffix: str = ".wav") -> str:

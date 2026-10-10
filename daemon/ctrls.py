@@ -496,7 +496,7 @@ class HwCtrls:
         )
         aux_bedSocketbtn.add_slave(
             Hwctrl(
-                pin=46,
+                pin=47,
                 hw_type=HWEvent.RELAY,
                 invert=True,
                 section="relay",
@@ -530,7 +530,7 @@ class HwCtrls:
         )
         aux_drawerBtn.add_slave(
             Hwctrl(
-                pin=47,
+                pin=46,
                 hw_type=HWEvent.RELAY,
                 invert=True,
                 section="relay",

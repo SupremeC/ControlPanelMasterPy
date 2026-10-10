@@ -6,6 +6,7 @@ from .cevent import CEvent
 from .smhi import SMHI
 
 
+
 logger = logging.getLogger("daemon.openaiWrapper")
 
 
@@ -19,11 +20,19 @@ class OpenAiWrapper:
     - Loaded via /etc/profile. see 'sudo nano /etc/profile'
     """
 
+    busy: bool = False
     audio: bytes | None
     """Raw audio data from last call."""
 
     def __init__(self):
-        self.client = OpenAI()
+        my_openai_key = (
+            open(
+                "/home/david/source/cpPy/ControlPanelMasterPy/daemon/cpanel-openai-service-account.secretkey"
+            )
+            .read()
+            .strip()
+        )
+        self.client = OpenAI(api_key=my_openai_key)
         self.audio: bytes = None
 
     def morningBreifing(self, events: list[CEvent]) -> str:
@@ -34,13 +43,17 @@ class OpenAiWrapper:
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
+        if self.busy:
+            return
         try:
+            self.busy = True
             weather = SMHI.get_weather_descr()
             arr = OpenAiWrapper.__build_morning_instr(weather, events)
             return self._send_chat(arr)
         except Exception as e:
             print(e)
             logger.error(e)
+        self.busy = False
         return ""
 
     def upcomingEvents(self, events: list[CEvent]) -> str:
@@ -56,6 +69,9 @@ class OpenAiWrapper:
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
+        if self.busy:
+            return
+        self.busy = True
         try:
             weather = SMHI.get_weather_descr()
             arr = OpenAiWrapper.__build_events_instr(weather, events)
@@ -63,10 +79,14 @@ class OpenAiWrapper:
         except Exception as e:
             print(e)
             logger.error(e)
+        self.busy = False
         return ""
 
     def _send_audio_chat(self, audio: str) -> str:
         """"""
+        if self.busy:
+            return
+        self.busy = True
         self.audio = None
         completion = self.client.chat.completions.create(
             model="gpt-4o-audio-preview",
@@ -75,10 +95,12 @@ class OpenAiWrapper:
             messages=OpenAiWrapper.build_audio_instr(audio),
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
+        self.busy = False
         return completion.choices[0].message
 
     def _send_chat(self, convo_arr) -> str:
         self.audio = None
+        completion = None
         completion = self.client.chat.completions.create(
             model="gpt-4o-audio-preview",
             modalities=["text", "audio"],
@@ -86,6 +108,7 @@ class OpenAiWrapper:
             messages=convo_arr,
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
+        logger.debug("New audio data received: %s", self.audio)
         return completion.choices[0].message
         # print(completion.choices[0].message)
 
@@ -98,7 +121,7 @@ class OpenAiWrapper:
         sys = {
             "role": "system",
             "content": """You are a positive helful assistant. Todays date is {dt}. Current time is {trn}.
-                 Answers should be tailored for an 11-year-old child named Axel""".format(
+                 Answers should be short, tailored for an 11-year-old child named Axel""".format(
                 dt=today, trn=timenow
             ),
         }

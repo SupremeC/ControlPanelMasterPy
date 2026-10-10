@@ -153,6 +153,7 @@ class Calender:
                 ):
                     self.alarm = e
             self.events = items
+            logger.info(f"downloaded {len(items)} calender events")
             print(f"downloaded {len(items)} calender events")
             return items
         except HttpError as error:
@@ -176,6 +177,7 @@ class Calender:
         if not self.creds or not self.creds.valid:
             logger.warning("Google Calender credentials(tokens) expired or not valid")
             if self.creds and self.creds.expired and self.creds.refresh_token:
+                logger.info("refreshing Google credential tokens")
                 self.creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
@@ -183,6 +185,7 @@ class Calender:
                     + "/client_secret_776060522090-prfipc44cc0ef87rr78rg5773an22uan.apps.googleusercontent.com.json",
                     self.SCOPES,
                 )
+                logger.warn("User input needed to refresh tokens")
                 self.creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
             with open(folder + "token.json", "w") as token:

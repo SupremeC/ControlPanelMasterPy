@@ -7,6 +7,10 @@ import os
 import os.path
 import time
 import signal
+import logging
+
+
+logger = logging.getLogger("daemon.super")
 
 
 class DaemonSC:
@@ -14,10 +18,15 @@ class DaemonSC:
     Usage: subclass the daemon class and override the run() method."""
 
     def __init__(self, pidfile):
+        print("Daemon__init__. I should be called. Process ID:%s", str(os.getpid()))
         self.pidfile = pidfile
         self.kill_now = False
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
+        logger.info(
+            "Hello from DaemonSC. Listening for signal SIGINT,SIGTERM. Process ID:%s",
+            str(os.getpid()),
+        )
 
     def daemonize(self):
         """Deamonize class. UNIX double fork mechanism."""
@@ -168,9 +177,10 @@ class DaemonSC:
 
     def exit_gracefully(self, signum, _):
         """Cleans up and set Kill flag"""
+        logger.info("exit_gracefully. Calling cleanup()")
         self.kill_now = True
-        self.cleanup(signum, signal.Signals(signum).name)
+        self.cleanup(signum)
 
-    def cleanup(self, signum, signame):
+    def cleanup(self, signum):
         """You should override this method when you subclass Daemon.
         It will be called when 'stop()' is called"""

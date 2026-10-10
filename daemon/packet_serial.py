@@ -219,6 +219,7 @@ class PacketSerial:
                     self._send_queue.task_done()
                     if packet is not None:
                         self.__send_packet(packet)
+                    time.sleep(0.05)
                 except Empty:
                     pass
                 except (
@@ -257,7 +258,7 @@ class PacketSerial:
         alist.append(packet)
         while len(alist) > self.STORE_X_PACKETS_IN_HISTORY:
             del alist[0]
-        logger.info(msg, packet)
+        # logger.info(msg, packet)
 
     @staticmethod
     def encode_packet(packet: Packet) -> bytes:

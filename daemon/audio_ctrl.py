@@ -220,6 +220,7 @@ class AudioCtrl:
 
         :Return: bool: True if recording started, False otherwise
         """
+        logger.debug("starting recording")
         self.current_filepath = None
         self.rec_time = None
         self.rec_channel.stop()  # Stop playing audio
@@ -236,9 +237,13 @@ class AudioCtrl:
     def stop_recording(self) -> None:
         """Signals 'Stop' and blocks until recording has stopped.
         The resulting .wave-file can be found at <AudioCtrl.current_filepath>"""
+        if not self.is_recording():
+            return
+        logger.debug("stopping recording...")
         self.rec_ctrl.stop()
         self.current_filepath = self.rec_ctrl.rec_filename
         self.rec_time = datetime.datetime.now()
+        logger.debug("recording stopped")
 
     def apply_effect(
         self, p_effect: EffectType, p_callback: Callable[[str], None] = None
@@ -269,7 +274,7 @@ class AudioCtrl:
         This effectively links audio file to HwCtrl button."""
         if (
             self.rec_time is not None
-            and datetime.now() >= self.rec_time + datetime.timedelta(minutes=1)
+            and datetime.datetime.now() >= self.rec_time + datetime.timedelta(minutes=1)
         ):
             self.rec_time = None
             self.current_filepath = None
@@ -325,11 +330,23 @@ class AudioCtrl:
         if self.current_filepath is None:
             self.sysaudio_play(SysAudioEvent.FAILED)
             return
+        if not AudioCtrl.file_exist(self.current_filepath):
+            self.sysaudio_play(SysAudioEvent.FAILED)
+            return
         self.rec_channel.stop()
-        sound = mixer.Sound(self.current_filepath)
-        self.effects_running = False
-        sound.set_volume(self.get_volume())
-        self.rec_channel.play(sound, loops=0)
+        try:
+            sound = mixer.Sound(self.current_filepath)
+            self.effects_running = False
+            sound.set_volume(self.get_volume())
+            self.rec_channel.play(sound, loops=0)
+        except Exception as x:
+            logger.error(x)
+            self.sysaudio_play(SysAudioEvent.FAILED)
+            self.current_filepath = None
+            self.rec_ctrl.recording = False
+            self.rec_time = None
+            self.rec_ctrl.stop()
+            self.rec_ctrl.rec_filename = None
 
     def __playback_monitor(self) -> None:
         while self._running:

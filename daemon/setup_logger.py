@@ -23,7 +23,7 @@ file_handler = handlers.TimedRotatingFileHandler(
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
 # logger.addHandler(file_handler)
-# logger.addHandler(stdout_handler)
+logger.addHandler(stdout_handler)
 
 logging.getLogger("Pyro5").setLevel(logging.DEBUG)
 logging.getLogger("Pyro5.core").setLevel(logging.DEBUG)

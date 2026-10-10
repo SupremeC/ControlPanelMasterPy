@@ -111,6 +111,10 @@ class Packet:
 
     def parse_bytes(self, byte_arr: bytes) -> None:
         """Parse bytes into packet values"""
+        if not isinstance(byte_arr, bytes) or len(byte_arr) < 4:
+            return
+        if byte_arr[0] > 18:
+            return
         try:
             self.hw_event = HWEvent(byte_arr[0])
             self.target = byte_arr[1]

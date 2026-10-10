@@ -75,3 +75,11 @@ arecord --list-devices
 
  # UART Port: we use /dev/serial0, which corresponds to UART1 (GPIO 14 and 15) on the Raspberry Pi.
  # Baud Rate: Set to 115200
+
+
+# Enter and exist python virtual environment
+# source env/bin/activate
+# deactivate
+
+ # Read log output from daemon
+    # sudo journalctl -u service_cp -f
