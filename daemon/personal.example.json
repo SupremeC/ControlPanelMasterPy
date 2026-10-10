@@ -1,4 +1,8 @@
 {
   "name": "Kim",
-  "birthday": "2014-06-30"
+  "birthday": "2014-06-30",
+  "location": {
+    "lat": 59.3293,
+    "lon": 18.0686
+  }
 }

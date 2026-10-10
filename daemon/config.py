@@ -88,6 +88,31 @@ class Config:
     # An alarm missed by up to this much (daemon restart) still rings.
     late_start_grace_minutes: int = 15
 
+    # Weather (SMHI, see daemon/weather.py). Parts of the day in local
+    # hours, start to end; a part gets the forecast steps ending after its
+    # start and up to its end.
+    weather_day_parts: tuple[tuple[str, int, int], ...] = (
+        ("morgon", 6, 9),
+        ("förmiddag", 9, 12),
+        ("eftermiddag", 12, 18),
+        ("kväll", 18, 22),
+    )
+    # Before this time the rest of today is described; from then on the
+    # rest of this evening and tomorrow until weather_tomorrow_until.
+    weather_evening_from: datetime.time = datetime.time(17, 0)
+    weather_tomorrow_until: int = 18  # hour
+    # Home is "location" in personal.json; without it, central Stockholm.
+    weather_default_location: tuple[float, float] = (59.3293, 18.0686)
+    smhi_timeout: float = 10  # seconds per request
+    weather_fresh_minutes: float = 30  # refetch an older forecast
+    # When SMHI fails, an older forecast is used up to this age.
+    weather_stale_hours: float = 6
+    # Keeps the forecast fresh and the hourly temperatures complete, so
+    # "colder than yesterday" works even on days without a briefing.
+    weather_refresh_minutes: float = 60
+    # Last forecast and recent hourly temperatures. Gitignored.
+    weather_state_file: Path = DAEMON_DIR / "weather_state.json"
+
     # Secrets live in daemon/ and are gitignored (the repo is public).
     openai_key_file: Path = DAEMON_DIR / "cpanel-openai-service-account.secretkey"
     # Creating a new token.json needs a browser login with the

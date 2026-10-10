@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from openai import OpenAI
 from .cevent import CEvent
-from .smhi import SMHI
 from .config import Config
 from .personal import Personal, swedish_date
 
@@ -48,20 +47,20 @@ class OpenAiWrapper:
             self._client = OpenAI(api_key=self._key_path.read_text().strip())
         return self._client
 
-    def morningBreifing(self, events: list[CEvent]) -> str:
+    def morningBreifing(self, events: list[CEvent], weather: str = "") -> str:
         """Calls OpenAI with weather and calender events as input.
 
         Args:
             events (list[cevent]): Calender events for today
+            weather: weather facts, empty when there are none
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
-        weather = SMHI.get_weather_descr()
         message = self._send_chat(self._morning_instr(weather, events))
         logger.info("Briefing: %s", message.audio.transcript)
         return message
 
-    def upcomingEvents(self, events: list[CEvent]) -> str:
+    def upcomingEvents(self, events: list[CEvent], weather: str = "") -> str:
         """Calls OpenAI with weather and calender events as input. Slightly
         shorter reponse then `morningBreifing` and the initial greeting is not fixed
         to "Good morning".
@@ -71,10 +70,10 @@ class OpenAiWrapper:
 
         Args:
             events (list): Calender events for today
+            weather: weather facts, empty when there are none
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
-        weather = SMHI.get_weather_descr()
         return self._send_chat(self._events_instr(weather, events))
 
     def _send_audio_chat(self, audio: str) -> str:
@@ -118,12 +117,14 @@ class OpenAiWrapper:
         self.audio = response.read()
         return self.audio
 
-    def fallback_briefing(self, events: list[CEvent]) -> str:
+    def fallback_briefing(self, events: list[CEvent], weather: str = "") -> str:
         """A short Swedish morning text made without the AI: greeting,
-        time and the first event of the day."""
+        time, the weather sentence and the first event of the day."""
         now = datetime.now()
         name = self._personal().name
         text = f"God morgon{' ' + name if name else ''}! Klockan är {now:%H:%M}."
+        if weather:
+            text += f" {weather}"
         timed = [e for e in events if e.has_time]
         if timed:
             first = min(timed, key=lambda e: e.start)
@@ -161,7 +162,7 @@ class OpenAiWrapper:
             lines.append(f"- {when}: {e.summary}{where}")
         facts = "Dagens händelser:\n" + ("\n".join(lines) or "- inga")
         if weather:
-            facts = f"Väder (på engelska, översätt): {weather}\n{facts}"
+            facts = f"{weather}\n\n{facts}"
         return facts
 
     def build_audio_instr(self, wav_data: str) -> list[dict]:
@@ -183,7 +184,8 @@ class OpenAiWrapper:
         steps = [
             "Säg god morgon till mig.",
             "Säg vilken dag det är.",
-            "Berätta kort om vädret." if weather else None,
+            "Berätta kort om vädret och vad det betyder för vilka kläder "
+            "jag ska ha." if weather else None,
             "Berätta om dagens händelser i tidsordning. "
             "Är det skola: säg när den börjar.",
             "Avsluta med något uppmuntrande.",
@@ -198,7 +200,11 @@ class OpenAiWrapper:
         return [self._system(), {"role": "user", "content": request}]
 
     def _events_instr(self, weather: str, events: list[CEvent]) -> list[dict]:
-        weather_part = "berätta kort om vädret och " if weather else ""
+        weather_part = (
+            "berätta kort om vädret och vad det betyder för kläderna, "
+            if weather
+            else ""
+        )
         request = (
             "Vad händer idag? Svara kort: säg vad klockan är, "
             f"{weather_part}berätta om dagens händelser som inte har varit än, "

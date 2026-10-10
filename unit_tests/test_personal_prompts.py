@@ -66,6 +66,22 @@ class TestPersonal(unittest.TestCase):
     def test_exampleFileLoads(self):
         example = Path(__file__).resolve().parent.parent / "daemon" / "personal.example.json"
         self.assertTrue(Personal.load(example).birthday)
+        self.assertEqual((59.3293, 18.0686), Personal.load(example).location)
+
+    def test_load_location(self):
+        self.path.write_text(json.dumps({"location": {"lat": "59.4", "lon": 17.9}}))
+        self.assertEqual((59.4, 17.9), Personal.load(self.path).location)
+
+    def test_load_badLocation_isLoggedAndIgnored(self):
+        for location in ({"lat": 59.4}, [59.4, 17.9], {"lat": 95, "lon": 17.9}):
+            with self.subTest(location=location):
+                # arrange
+                data = {"name": "Kim", "birthday": "2014-06-30", "location": location}
+                self.path.write_text(json.dumps(data))
+
+                # act / assert: name and age survive
+                with self.assertLogs("daemon.personal", "ERROR"):
+                    self.assertEqual(Personal("Kim", BIRTHDAY), Personal.load(self.path))
 
     def test_swedishDate(self):
         self.assertEqual("måndag 12 oktober", swedish_date(datetime.date(2026, 10, 12)))
@@ -111,13 +127,26 @@ class TestPrompts(PromptTestCase):
         self.assertIn("4. Avsluta med något uppmuntrande.", user["content"])
         self.assertIn("- inga", user["content"])
 
-    def test_weather_isAStep(self):
-        _, user = self.ai._morning_instr("Weather today is cloudy", [])
-        self.assertIn("3. Berätta kort om vädret.", user["content"])
+    def test_weather_isAStepWithClothes(self):
+        _, user = self.ai._morning_instr("Väder idag, måndag 12 oktober:\n- Morgon", [])
+        self.assertIn(
+            "3. Berätta kort om vädret och vad det betyder för vilka kläder jag ska ha.",
+            user["content"],
+        )
+        self.assertIn("\n\nVäder idag, måndag 12 oktober:\n- Morgon\n\nDagens händelser:",
+                      user["content"])
+        self.assertNotIn("engelska", user["content"])
 
     def test_events_requestIsInTheUserMessage(self):
         _, user = self.ai._events_instr("", self.events)
         self.assertIn("Vad händer idag?", user["content"])
+        self.assertNotIn("vädret", user["content"])
+
+    def test_events_withWeather(self):
+        _, user = self.ai._events_instr("Väder ikväll", self.events)
+        self.assertIn("berätta kort om vädret och vad det betyder för kläderna, ",
+                      user["content"])
+        self.assertIn("Väder ikväll\n\nDagens händelser:", user["content"])
 
     def test_recordedQuestion_swedishSystemThenAudio(self):
         system, user = self.ai.build_audio_instr("d2F2")
@@ -133,6 +162,10 @@ class TestFallback(PromptTestCase):
 
     def test_noEvents(self):
         self.assertIn("Jag hittar inget i kalendern idag.", self.ai.fallback_briefing([]))
+
+    def test_weatherSentenceAfterTheTime(self):
+        text = self.ai.fallback_briefing(self.events, "Idag blir det 7 grader.")
+        self.assertRegex(text, r"Klockan är \d\d:\d\d\. Idag blir det 7 grader\. Idag börjar")
 
     def test_speak_usesTtsAndStoresAudio(self):
         # arrange

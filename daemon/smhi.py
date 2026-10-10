@@ -1,225 +1,213 @@
-# import requests module
-from datetime import timezone, datetime, time
-import logging
-import requests
-from daemon.weather import Forecast, RawForecast
+"""SMHI point forecast, model SNOW (snow1g). No authentication.
 
+Docs: https://opendata.smhi.se/metfcst/snow1gv1/ (rendered with JavaScript;
+the parameter table and the code tables are on the "Parameters" page).
+
+The response has a `timeSeries` list. Each item has a valid `time` (UTC)
+and a flat `data` dict. All values are instantaneous at `time` except
+precipitation, which covers `intervalParametersStartTime`..`time` and is
+always in mm/h. The steps are hourly for about 2.5 days, then 3, 6 and
+12 hours, up to about 10 days ahead.
+
+This module only fetches and parses. Turning steps into words is
+daemon/weather.py.
+"""
+
+from dataclasses import dataclass
+import datetime
+from enum import IntEnum
+import logging
+from zoneinfo import ZoneInfo
+
+import requests
 
 logger = logging.getLogger("daemon.smhi")
 
+FORECAST_URL = (
+    "https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1"
+    "/geotype/point/lon/{lon}/lat/{lat}/data.json"
+)
+TIMEZONE = ZoneInfo("Europe/Stockholm")
+MISSING = 9999
+NO_PRECIPITATION = -9  # precipitation_frozen_part when it is dry
 
-class SMHI:
-    """pulls data from SMHI API
-    Authentication: None
-    API documentation: https://opendata.smhi.se/apidocs/metfcst/parameters.html#parameter-cloud-cover"""
-    long = 17.870
-    lat = 59.386
 
-    @staticmethod
-    def get_weather_descr() -> str:
-        try:
-            raw = SMHI.__get_weather_forecast()
-            forecast = SMHI._parse_weather_json(raw)
-            return SMHI._forecast_as_str(forecast)
-        except Exception as e:
-            logger.error(e)
-        return ""
+class SmhiError(Exception):
+    """The forecast could not be fetched or its format has changed."""
 
-    # weather today is {cloudy|Halfclear|sunny}, temperatures averaging {avgT}, lows/highs about {c_high}
-    # with {light|moderate|heavy}} {rain|rain+snow(sleet)|} during {whole,morning,afternoon,evening}
-    # {lightning likely} {wind}
 
-    @staticmethod
-    def _forecast_as_str(f: Forecast) -> str:
-        winterTime = (
-            True if datetime.now().month > 9 or datetime.now().month < 4 else False
-        )
-        tempstr = (
-            f"lows about {int(round(f.low_c))}"
-            if winterTime
-            else f"highs about {int(round(f.high_c))}, "
-        )
-        msg = f"Weather today is {f.sky}, "
-        msg += f"temperatures averaging {int(round(f.avg_c))}, {tempstr}, "
-        msg += f"{f.downfall} {f.lightning} {f.wind}"
-        return msg
+class PrecipType(IntEnum):
+    """predominant_precipitation_type_at_surface (ECMWF ptype)."""
 
-    @staticmethod
-    def _parse_weather_json(raw: dict) -> Forecast:
-        rf = RawForecast(raw)
-        today = datetime.now(timezone.utc)
-        d = SMHI.__filter_by_date(rf.timeSeries, today)
-        if len(d) > 6:
-            d = SMHI._filter_by_time(d, 7, 21)
+    NONE = 0
+    RAIN = 1
+    THUNDERSTORM = 2
+    FREEZING_RAIN = 3
+    MIXED_ICE = 4
+    SNOW = 5
+    WET_SNOW = 6
+    RAIN_AND_SNOW = 7
+    ICE_PELLETS = 8
+    GRAUPEL = 9
+    HAIL = 10
+    DRIZZLE = 11
+    FREEZING_DRIZZLE = 12
 
-        forecast = Forecast()
-        forecast.temp(*SMHI._get_temp(d))
-        forecast.sky = SMHI._get_cloudiness(d)
-        forecast.lightning = SMHI._get_lightningdescr(d)
-        forecast.wind = SMHI._get_wind_descr(d)
-        forecast.downfall = SMHI._get_downfall_descr(d)
-        return forecast
-        pass
 
-    @staticmethod
-    def _get_downfall_descr(timeSeries) -> str:
-        msg = ""
-        snow_avg = 0
-        rain_avg = 0
+@dataclass(frozen=True)
+class Step:
+    """One forecast time step. A value SMHI marks as missing is None.
 
-        rrain = [
-            obj
-            for obj in timeSeries
-            if any(
-                param["name"] == "pcat" and 2 < param["values"][0] <= 6
-                for param in obj["parameters"]
-            )
-        ]
+    Times are UTC. Python compares and subtracts datetimes that share a
+    tzinfo by wall clock, so in local time the two 02:00 of the October DST
+    change would be equal; use local_start/local_end only for display and
+    for picking the day and hour."""
 
-        rsnow = [
-            obj
-            for obj in timeSeries
-            if any(
-                param["name"] == "pcat" and 1 <= param["values"][0] < 3
-                for param in obj["parameters"]
-            )
-        ]
-        if len(rrain) > 0:
-            rainmm_min = sum(SMHI._get_val_by_parameter(rrain, "pmin"))
-            rainmm_max = sum(SMHI._get_val_by_parameter(rrain, "pmax"))
-            rain_avg = (rainmm_min + rainmm_max) / len(rrain)
+    start: datetime.datetime
+    """Start of the precipitation interval (the previous step), UTC."""
+    end: datetime.datetime
+    """Valid time of every value except precipitation, UTC."""
+    temp: float | None
+    """Air temperature, °C."""
+    wind: float | None
+    """Mean wind, m/s."""
+    gust: float | None
+    """Wind gust, m/s."""
+    wind_dir: int | None
+    """Wind from direction, degrees."""
+    humidity: int | None
+    """Relative humidity, %."""
+    visibility: float | None
+    """Visibility, km."""
+    cloud: int | None
+    """Total cloud cover, oktas 0-8."""
+    precip: float | None
+    """Mean precipitation over the interval, mm/h."""
+    precip_max: float | None
+    """Largest precipitation among the ensemble members that have any, mm/h."""
+    precip_prob: int | None
+    """Probability of at least 0.1 mm, %."""
+    precip_type: PrecipType | None
+    frozen_part: int | None
+    """Frozen part of the precipitation, %. None when dry."""
+    thunder_prob: int | None
+    """Thunderstorm probability, %."""
+    symbol: int | None
+    """Weather symbol (Wsymb2) 1-27, SMHI's own summary of the step."""
 
-        if len(rsnow) > 0:
-            snowmm_min = sum(SMHI._get_val_by_parameter(rsnow, "pmin"))
-            snowmm_max = sum(SMHI._get_val_by_parameter(rsnow, "pmax"))
-            snow_avg = (snowmm_min + snowmm_max) / len(rsnow)
+    @property
+    def hours(self) -> float:
+        """Length of the precipitation interval."""
+        return (self.end - self.start).total_seconds() / 3600
 
-        if rain_avg > 0.1:
-            if rain_avg < 4:
-                msg += "some rain"
-            elif rain_avg >= 4 and rain_avg < 10:
-                msg += "rain"
+    @property
+    def local_start(self) -> datetime.datetime:
+        return self.start.astimezone(TIMEZONE)
+
+    @property
+    def local_end(self) -> datetime.datetime:
+        return self.end.astimezone(TIMEZONE)
+
+
+@dataclass(frozen=True)
+class Forecast:
+    created: datetime.datetime
+    """When SMHI made the forecast, UTC."""
+    steps: tuple[Step, ...]
+
+
+def forecast_url(lat: float, lon: float) -> str:
+    return FORECAST_URL.format(lat=lat, lon=lon)
+
+
+def fetch_forecast_json(lat: float, lon: float, timeout: float) -> dict:
+    """The raw forecast for the point. Blocking; raises SmhiError."""
+    url = forecast_url(lat, lon)
+    try:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        # HTTPError, Timeout, ConnectionError and (requests >= 2.27)
+        # a body that is not JSON all derive from RequestException.
+        raise SmhiError(f"SMHI forecast {url}: {e}") from e
+    except ValueError as e:
+        raise SmhiError(f"SMHI forecast {url} is not JSON: {e}") from e
+
+
+def fetch_forecast(lat: float, lon: float, timeout: float) -> Forecast:
+    return parse_forecast(fetch_forecast_json(lat, lon, timeout))
+
+
+def parse_forecast(raw: dict) -> Forecast:
+    """Pure. Raises SmhiError when the layout is not what this code
+    knows, so a format change shows up as such and not as a KeyError."""
+    try:
+        created = _utc_time(raw["createdTime"])
+        series = raw["timeSeries"]
+        steps: list[Step] = []
+        for item in series:
+            end = _utc_time(item["time"])
+            interval_start = item.get("intervalParametersStartTime")
+            if interval_start:
+                start = _utc_time(interval_start)
+            elif steps:
+                start = steps[-1].end
             else:
-                msg += "heavy rain"
-            if len(rrain) < 4:
-                msg += " part of the day."
-            elif rain_avg > 0.2:
-                msg += " most of the day."
-
-        if snow_avg > 0.1:
-            if snow_avg < 3:
-                msg += "some snow"
-            elif snow_avg >= 3 and snow_avg < 10:
-                msg += "snowy"
-            else:
-                msg += "heavy snowing"
-            if len(rsnow) < 4:
-                "part of the day."
-            elif snow_avg > 0.3:
-                msg += " most of the day."
-        return msg
-
-    @staticmethod
-    def _get_wind_descr(timeSeries) -> str:
-        t = SMHI._get_val_by_parameter(timeSeries, "ws")
-        avg = sum(t) / len(t)
-        if avg < 10:
-            return ""
-        if avg > 10 and avg <= 14:
-            return "wind: strong breeze"
-        if avg > 14 and avg <= 17.2:
-            return "wind: Moderate gale"
-        if avg > 17.2 and avg <= 20.6:
-            return "wind: fresh gale"
-        if avg > 20.6 and avg <= 24.4:
-            return "wind: Sever gale"
-        if avg > 24.4 and avg <= 28.4:
-            return "wind: Storm!"
-        if avg > 28.4 and avg <= 32.6:
-            return "wind: Violent Storm!"
-        if avg > 28.4 and avg <= 32.6:
-            return "wind: Hurricane-force!"
-
-    @staticmethod
-    def _get_lightningdescr(timeSeries) -> str:
-        t = SMHI._get_val_by_parameter(timeSeries, "tstm")
-        c_thunder = sum(1 for x in t if x > 30)
-        if c_thunder == 0:
-            return ""
-        avg_thunder = sum(x for x in t if x >= 30) / c_thunder
-        return "" if avg_thunder < 30 else ", lightning likely today,"
-
-    @staticmethod
-    def _get_cloudiness(timeSeries) -> str:
-        t = SMHI._get_val_by_parameter(timeSeries, "tcc_mean")
-        c = len(t)
-        if c == 0:
-            return "sunny"
-        c_notcloudy = sum(1 for x in t if x < 3) / c
-        c_medcloudy = sum(1 for x in t if x >= 3 and x < 7) / c
-        c_verycloudy = sum(2 for x in t if x >= 6) / c
-
-        if c_notcloudy > 0 and (c_medcloudy + c_verycloudy) < 0.3:
-            return "sunny"
-        if abs(c_notcloudy - (c_medcloudy + c_verycloudy)) < 0.2:
-            return "half clear"
-        else:
-            return "cloudy"
-
-    @staticmethod
-    def _get_temp(timeSeries) -> tuple[int, int, int]:
-        """Returns the lowest, avg and highest temperture
-        found in the series"""
-        t = SMHI._get_val_by_parameter(timeSeries, "t")
-        min_val = min(t)
-        max_val = max(t)
-        avg = sum(t) / len(t)
-        return (min_val, avg, max_val)
-
-    @staticmethod
-    def _filter_by_time(timeSeries, start_h: int, end_h: int):
-        """Returns items that fall within (inclusive) the hour
-        start and end range"""
-        items = []
-        for ts in timeSeries:
-            if ts["validTime"].time() >= time(hour=start_h) and ts[
-                "validTime"
-            ].time() <= time(hour=end_h):
-                items.append(ts)
-        return items
-
-    @staticmethod
-    def _get_val_by_parameter(timeSeries, name: str):
-        items = []
-        for ts in timeSeries:
-            for p in ts["parameters"]:
-                if p["name"] == name:
-                    for v in p["values"]:
-                        items.append(v)
-        return items
-
-    @staticmethod
-    def __filter_by_date(timeSeries, date: datetime):
-        items = []
-        for ts in timeSeries:
-            validTime = datetime.fromisoformat(ts["validTime"])
-            ts["validTime"] = validTime
-            if validTime.date() == date.date():
-                items.append(ts)
-        return items
-
-    @staticmethod
-    def __get_weather_forecast() -> str:
-        """Calls SMHI API for the defined LONG/LAT and
-        returns the raw response body containing a weather forecast
-        for that geographic location"""
-        base_url = "https://opendata-download-metfcst.smhi.se/"
-        endpoint = (
-            "api/category/pmp3g/version/2/geotype/point/lon/{long}/lat/{lat}/data.json"
-        )
-        complete_url = base_url + endpoint.format(long=SMHI.long, lat=SMHI.lat)
-        return requests.get(complete_url).text
+                start = end - datetime.timedelta(hours=1)
+            steps.append(_step(start, end, item["data"]))
+    except (KeyError, TypeError, ValueError) as e:
+        raise SmhiError(f"SMHI forecast format has changed: {e!r}") from e
+    if not steps:
+        raise SmhiError("SMHI forecast has no time steps")
+    if all(s.temp is None for s in steps):
+        raise SmhiError("SMHI forecast has no air_temperature (format changed?)")
+    return Forecast(created=created, steps=tuple(steps))
 
 
-if __name__ == "__main__":
-    SMHI.get_weather_descr()
+def _step(start: datetime.datetime, end: datetime.datetime, data: dict) -> Step:
+    def value(name: str):
+        v = data.get(name)
+        return None if v is None or v == MISSING else v
+
+    def whole(name: str) -> int | None:
+        v = value(name)
+        return None if v is None else int(round(v))
+
+    frozen = whole("precipitation_frozen_part")
+    return Step(
+        start=start,
+        end=end,
+        temp=value("air_temperature"),
+        wind=value("wind_speed"),
+        gust=value("wind_speed_of_gust"),
+        wind_dir=whole("wind_from_direction"),
+        humidity=whole("relative_humidity"),
+        visibility=value("visibility_in_air"),
+        cloud=whole("cloud_area_fraction"),
+        precip=value("precipitation_amount_mean"),
+        precip_max=value("precipitation_amount_max"),
+        precip_prob=whole("probability_of_precipitation"),
+        precip_type=_precip_type(whole("predominant_precipitation_type_at_surface")),
+        frozen_part=None if frozen == NO_PRECIPITATION else frozen,
+        thunder_prob=whole("thunderstorm_probability"),
+        symbol=whole("symbol_code"),
+    )
+
+
+def _precip_type(code: int | None) -> PrecipType | None:
+    if code is None:
+        return None
+    try:
+        return PrecipType(code)
+    except ValueError:
+        logger.warning("Unknown SMHI precipitation type %d", code)
+        return None
+
+
+def _utc_time(text: str) -> datetime.datetime:
+    """'2026-10-10T12:00:00Z' -> aware UTC datetime."""
+    t = datetime.datetime.fromisoformat(text)
+    if t.tzinfo is None:
+        raise ValueError(f"time without zone: {text}")
+    return t.astimezone(datetime.timezone.utc)

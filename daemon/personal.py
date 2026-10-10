@@ -1,9 +1,11 @@
 """Who the panel talks to. Read from daemon/personal.json, which is
 gitignored because this repo is public (see personal.example.json):
 
-    {"name": "...", "birthday": "YYYY-MM-DD"}
+    {"name": "...", "birthday": "YYYY-MM-DD",
+     "location": {"lat": 59.33, "lon": 18.07}}
 
-The age is computed from the birthday, so it never goes stale.
+The age is computed from the birthday, so it never goes stale. The
+location (home, for the weather) is optional.
 """
 
 from dataclasses import dataclass
@@ -25,6 +27,8 @@ MONTHS = (
 class Personal:
     name: str = ""
     birthday: datetime.date | None = None
+    location: tuple[float, float] | None = None
+    """(lat, lon) of home."""
 
     def age(self, today: datetime.date) -> int | None:
         """Full years on `today`, or None without a birthday."""
@@ -49,12 +53,28 @@ class Personal:
             return Personal(
                 name=str(data.get("name", "")).strip(),
                 birthday=datetime.date.fromisoformat(birthday) if birthday else None,
+                location=_location(data.get("location"), path),
             )
         except FileNotFoundError:
             logger.warning("%s missing: speaking without name and age", path)
         except (ValueError, TypeError, AttributeError) as e:
             logger.error("%s is not valid (%s): speaking without name and age", path, e)
         return Personal()
+
+
+def _location(value, path: Path) -> tuple[float, float] | None:
+    """A broken location is logged and ignored; name and age still work."""
+    if value is None:
+        return None
+    try:
+        lat, lon = float(value["lat"]), float(value["lon"])
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error("%s: location is not valid (%r): ignored", path, e)
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        logger.error("%s: location %s, %s is out of range: ignored", path, lat, lon)
+        return None
+    return lat, lon
 
 
 def swedish_date(day: datetime.date) -> str:

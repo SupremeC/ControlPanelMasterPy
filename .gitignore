@@ -17,6 +17,7 @@ bin/*
 *.wav
 token.json
 daemon/personal.json
+daemon/weather_state.json*
 
 ~.bashrc
 

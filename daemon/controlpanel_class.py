@@ -30,6 +30,7 @@ from daemon.openaiWrapper import OpenAiWrapper
 from daemon.gCalender import TIMEZONE, Calender
 from daemon.morning import MorningRoutine, State as MorningState
 from daemon import sunrise
+from daemon.weather_service import WeatherReport, WeatherService
 
 logger = logging.getLogger("daemon.ctrlPanel")
 # The serial buffer of Arduino is increased to 256 bytes (if it works)
@@ -46,6 +47,7 @@ MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
 DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
 BRIEFING_RETRY_DELAY = 60  # seconds before a failed briefing is generated again
 MORNING_TEST_LEAD = 120  # seconds from SIGUSR1 to the test alarm
+WEATHER_FIRST_REFRESH = 30  # seconds after start; then every weather_refresh_minutes
 # Silence between the alarm, the chimes and speech, so they do not melt
 # together. The "off" chime waits for the alarm's fade-out plus the gap.
 CHIME_GAP = 0.5  # seconds
@@ -120,6 +122,8 @@ class ControlPanel:
             lambda playing: self._events.put(PlaybackChanged(playing))
         )
         self.wled_instance = WLED(self._config.wled_port, self._config.wled_baud)
+        # Used on the AI lane only (blocking HTTP, not thread-safe).
+        self.weather = WeatherService(self._config)
         # Written and read only on the AI lane, so jobs see it in order.
         self._briefing_audio: bytes | None = None
         self._briefing_retried = False
@@ -165,6 +169,7 @@ class ControlPanel:
             self._components_stack = stack.pop_all()
         self.reset()
         self._real_morning.start()
+        self.call_later(WEATHER_FIRST_REFRESH, self._weather_refresh)
 
     def stop(self):
         """Stops all started components in reverse order.
@@ -658,14 +663,32 @@ class ControlPanel:
         self.ai._send_audio_chat(AudioCtrl._read_wav_file(wav_path))
         self._audioctrl.play_bytes(self.ai.audio)
 
+    def _weather_refresh(self) -> None:
+        """Keeps the forecast fresh on the AI lane. Main thread timer."""
+        self._run_job(
+            self._ai_jobs,
+            "weather-refresh",
+            self.weather.refresh,
+            on_error=lambda _error: None,  # already logged; no sound
+        )
+        self.call_later(self._config.weather_refresh_minutes * 60, self._weather_refresh)
+
+    def _weather_report(self) -> WeatherReport | None:
+        report = self.weather.report()
+        if report:
+            logger.info("Weather facts:\n%s", report.facts)
+        return report
+
     def _tell_upcoming_events(self) -> None:
         self.cal.fetch()
-        self.ai.upcomingEvents(self.cal.todays_events())
+        report = self._weather_report()
+        self.ai.upcomingEvents(self.cal.todays_events(), report.facts if report else "")
         self._audioctrl.play_bytes(self.ai.audio)
 
     def _generate_briefing(self) -> bytes:
         self.cal.fetch()
-        self.ai.morningBreifing(self.cal.todays_events())
+        report = self._weather_report()
+        self.ai.morningBreifing(self.cal.todays_events(), report.facts if report else "")
         return self.ai.audio
 
     def _prepare_briefing(self) -> None:
@@ -694,7 +717,11 @@ class ControlPanel:
         except Exception:
             logger.exception("Briefing failed. Reading the fallback text")
         try:
-            return self.ai.speak(self.ai.fallback_briefing(self.cal.todays_events()))
+            report = self.weather.report()  # cached unless SMHI failed
+            sentence = report.sentence if report else ""
+            return self.ai.speak(
+                self.ai.fallback_briefing(self.cal.todays_events(), sentence)
+            )
         except Exception:
             logger.exception("Fallback briefing failed. Only the chime plays")
         return None

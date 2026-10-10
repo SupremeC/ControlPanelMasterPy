@@ -31,6 +31,8 @@ class EventLoopTestCase(unittest.TestCase):
         cp.wled_instance = mock.Mock()
         cp.ai = mock.Mock()
         cp.cal = mock.Mock()
+        cp.weather = mock.Mock()
+        cp.weather.report.return_value = mock.Mock(facts="FACTS", sentence="SENTENCE")
         for lane in (cp._audio_jobs, cp._ai_jobs, cp._wled_jobs):
             lane.start()
             self.addCleanup(lane.stop)
@@ -243,7 +245,9 @@ class TestMorningWiring(EventLoopTestCase):
         self.assertTrue(
             self.process_until(lambda: self.cp.morning.state == State.DONE, timeout=5)
         )
-        self.cp.ai.morningBreifing.assert_called_once()  # prepared, not again
+        self.cp.ai.morningBreifing.assert_called_once_with(  # prepared, not again
+            self.cp.cal.todays_events.return_value, "FACTS"
+        )
         self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
         self.cp._audioctrl.volume_override.assert_called_with(False, 70)
@@ -279,6 +283,9 @@ class TestMorningWiring(EventLoopTestCase):
 
         # assert
         self.assertTrue(done)
+        self.cp.ai.fallback_briefing.assert_called_once_with(
+            self.cp.cal.todays_events.return_value, "SENTENCE"
+        )
         self.cp.ai.speak.assert_called_once_with("God morgon!")
         self.cp._audioctrl.play_bytes.assert_called_once_with(
             self.cp.ai.speak.return_value
@@ -371,6 +378,30 @@ class TestMorningTest(EventLoopTestCase):
         self.assertIs(self.cp._real_morning, self.cp.morning)
 
 
+class TestWeatherRefresh(EventLoopTestCase):
+    def test_refreshesOnTheAiLaneAndReschedules(self):
+        # act
+        self.cp._weather_refresh()
+
+        # assert
+        self.assertTrue(self.process_until(lambda: self.cp.weather.refresh.called))
+        timers = [t for t in self.cp._timers if t[2] == self.cp._weather_refresh]
+        self.assertEqual(1, len(timers))
+        self.assertAlmostEqual(time.monotonic() + 3600, timers[0][0], delta=5)
+
+    def test_failure_isQuiet(self):
+        # arrange
+        self.cp.weather.refresh.side_effect = RuntimeError("bug")
+
+        # act
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.cp._weather_refresh()
+            self.process_until(lambda: False, timeout=0.3)  # let the job finish
+
+        # assert
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
+
+
 class TestAiButton(EventLoopTestCase):
     def test_success_blinksUntilAnswerPlayed(self):
         # arrange
@@ -382,8 +413,24 @@ class TestAiButton(EventLoopTestCase):
         # assert
         btn.leds[0].blink.assert_called_once_with(forever=True)
         self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
-        self.cp.ai.upcomingEvents.assert_called_once()
+        self.cp.ai.upcomingEvents.assert_called_once_with(
+            self.cp.cal.todays_events.return_value, "FACTS"
+        )
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+
+    def test_noWeather_asksWithoutIt(self):
+        # arrange
+        btn = mock.MagicMock()
+        self.cp.weather.report.return_value = None
+
+        # act
+        self.cp.ai_talk(btn, audio_call=False)
+
+        # assert
+        self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
+        self.cp.ai.upcomingEvents.assert_called_once_with(
+            self.cp.cal.todays_events.return_value, ""
+        )
 
     def test_failure_playsFailedAndStopsBlink(self):
         # arrange
