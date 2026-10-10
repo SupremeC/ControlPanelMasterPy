@@ -27,6 +27,11 @@ logger = logging.getLogger("daemon.ctrlPanel")
 # to send (1000/25ms)*25packets = 1000 packets per second.
 MAX_PACKETS_IN_SEND_QUEUE = 50
 SEND_HELLO_INTERVALL = 120  # seconds
+# A Mega with its own power supply keeps running when the USB cable is
+# unplugged, so a reconnect does not always produce a BOOTMEGA. If none
+# arrives this long after a (re)connect, ask the Mega for its status.
+# A rebooting Mega needs about 10 s before it sends BOOTMEGA.
+RESYNC_AFTER_CONNECT = 15  # seconds
 
 
 class ControlPanel:
@@ -37,6 +42,7 @@ class ControlPanel:
     def __init__(self):
         self._last_sent_hello: datetime.datetime = None
         self._last_received_hello: datetime.datetime = None
+        self._synced_connection: float | None = None
         self._ctrls: HwCtrls = HwCtrls()
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._packet_receivedqueue: Queue = Queue()
@@ -96,11 +102,24 @@ class ControlPanel:
         """Call this method regularly to process packets"""
         try:
             self._process_packets()
+            self._resync_if_needed()
             if self.time_to_send_hello():
                 self._pserial.send_hello()
                 self._last_sent_hello = datetime.datetime.now()
         except Exception as e:
             logger.exception(e)
+
+    def _resync_if_needed(self) -> None:
+        """Requests the Mega's status once per connection if no BOOTMEGA
+        arrived within RESYNC_AFTER_CONNECT seconds of connecting."""
+        connected_at = self._pserial.connected_at
+        if connected_at is None or connected_at == self._synced_connection:
+            return
+        if time.monotonic() - connected_at < RESYNC_AFTER_CONNECT:
+            return
+        self._synced_connection = connected_at
+        logger.info("No BOOTMEGA since the Mega connected. Requesting status")
+        self.reset()
 
     def _process_packets(self) -> None:
         try:
@@ -114,6 +133,7 @@ class ControlPanel:
         try:
             if packet.hw_event == HWEvent.BOOTMEGA:
                 logger.info("Received BOOTMEGA packet. Mega was (re)booted")
+                self._synced_connection = self._pserial.connected_at
                 self.reset()
             elif packet.hw_event == HWEvent.HELLO:
                 self._last_received_hello = datetime.datetime.now()
@@ -122,6 +142,7 @@ class ControlPanel:
                 self.reset()
             elif packet.hw_event == HWEvent.STATUS:
                 # Status packet. Target == Switch pin.
+                logger.debug("Status: pin %d = %d", packet.target, packet.val)
                 self._switch_status_changed(packet, no_action=True)
             elif packet.hw_event == HWEvent.SWITCH:
                 # A switch has changed status. React

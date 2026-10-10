@@ -86,6 +86,7 @@ class Test_PacketSerial(unittest.TestCase):
         mock_comports.assert_not_called()
         mock_serial.assert_not_called()
         self.assertIsNone(ps.port)
+        self.assertIsNone(ps.connected_at)
         self.assertIsNone(ps._readserial_thread)
         self.assertFalse(ps.is_conn_open)
 
@@ -101,9 +102,37 @@ class Test_PacketSerial(unittest.TestCase):
         # assert
         mock_serial.assert_called_once_with(port="dev5", baudrate=115200, timeout=1)
         self.assertEqual("dev5", ps.port)
+        self.assertIsNotNone(ps.connected_at)
         self.assertTrue(ps.is_conn_open)
         self.assertTrue(ps._readserial_thread.is_alive(), "ReadThread should be running")
         self.assertTrue(ps._writeserial_thread.is_alive(), "WriteThread should be running")
+
+    @mock.patch("serial.Serial")
+    def test_open_flushesBeforeAnythingElse(self, mock_serial, mock_comports):
+        # arrange
+        fake_port = self._fake_port(mock_serial)
+        ps = self._make(mock_comports)
+
+        # act
+        ps.start()
+
+        # assert: input dropped, then a lone divider ends any half frame
+        fake_port.reset_input_buffer.assert_called_once()
+        self.assertEqual(mock.call(b"\x00"), fake_port.write.call_args_list[0])
+
+    @mock.patch("serial.Serial")
+    def test_open_writeFails_portClosedAndRetried(self, mock_serial, mock_comports):
+        # arrange
+        fake_port = self._fake_port(mock_serial)
+        fake_port.write.side_effect = [serial.SerialException("gone"), None, None, None]
+        ps = self._make(mock_comports)
+
+        # act
+        ps.start()
+
+        # assert
+        fake_port.close.assert_called_once()
+        self.assertTrue(_wait_until(lambda: ps.is_conn_open), "never retried")
 
     @mock.patch("serial.Serial")
     def test_stop_stopsThreadsAndClosesPort(self, mock_serial, mock_comports):
@@ -187,9 +216,11 @@ class Test_PacketSerial(unittest.TestCase):
 
         # act
         ps.start()
+        first_connect = ps.connected_at
 
         # assert
         self.assertTrue(_wait_until(lambda: mock_serial.call_count >= 2), "no reconnect")
+        self.assertTrue(_wait_until(lambda: ps.connected_at != first_connect))
         fake_port.close.assert_called_once()
         self.assertTrue(_wait_until(lambda: ps.is_conn_open))
 

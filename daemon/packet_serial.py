@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from queue import Empty, Full, Queue
 import serial
 import serial.tools.list_ports
@@ -62,6 +63,8 @@ class PacketSerial:
         self._readserial_thread = None
         self._writeserial_thread = None
         self._reported_missing = False
+        self.connected_at: float | None = None
+        """time.monotonic() of the last successful (re)connect, or None."""
         self.last_sent: list[Packet] = []
         self.last_received: list[Packet] = []
         self.throttle: SlidingWindow = SlidingWindow(55, 0.05)
@@ -128,17 +131,28 @@ class PacketSerial:
                 )
                 self._reported_missing = True
             return False
+        ser = None
         try:
-            self._ser = serial.Serial(
+            ser = serial.Serial(
                 port=port, baudrate=self.BAUDRATE, timeout=self.READ_TIMEOUT
             )
+            # A freshly plugged-in port echoes for a moment before it is
+            # switched to raw mode, which can leave half a frame in the
+            # Mega's receive buffer. A lone divider ends that frame so the
+            # next real packet arrives intact.
+            ser.reset_input_buffer()
+            ser.write(self.PACKET_DEVIDER)
         except (serial.SerialException, OSError) as e:
+            if ser is not None:
+                ser.close()
             if not self._reported_missing:
                 logger.error("Opening %s failed: %s. Retrying", port, e)
                 self._reported_missing = True
             return False
+        self._ser = ser
         self._port = port
         self._reported_missing = False
+        self.connected_at = time.monotonic()
         logger.info("PacketSerial: port %s open", port)
         return True
 
