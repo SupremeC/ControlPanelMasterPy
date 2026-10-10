@@ -109,6 +109,22 @@ class Config:
     # Check-ins ignore the pot and the master and sound switches.
     checkin_volume: int = 60
 
+    # Night (daemon/night.py). At night_off_at the panel backlight, every
+    # LED and the sockets listed (button pins) go off and the LED strips
+    # go to a dim red night light; nothing is said. Until night_until a
+    # daemon restart does it again and a Mega status resync re-lights
+    # nothing. Inputs keep working. The bed lamp (its state is unknown,
+    # the relay only pulses its toggle) and the bed socket are left alone.
+    night_off_at: datetime.time = datetime.time(22, 30)
+    night_until: datetime.time = datetime.time(5, 0)
+    night_off_sockets: tuple[int, ...] = (68,)  # the drawer (byrå) socket
+    # The same light as the WLED preset "Lowred": both segments on, no
+    # effect. Set with WLED.set_both(), like the sunrise frames.
+    night_strip_rgbw: tuple[int, int, int, int] = (255, 0, 34, 0)
+    night_strip_brightness: int = 64
+    night_strip_transition: float = 5  # seconds of fade
+    night_tick_seconds: float = 30
+
     # Speech (daemon/speech.py): local Swedish templates, the text model
     # only for the joke and the clothing advice, then text-to-speech. One
     # voice for everything, also the answers to recorded questions
