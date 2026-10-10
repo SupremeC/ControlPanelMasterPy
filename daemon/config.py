@@ -71,6 +71,20 @@ class Config:
     alarm_volume: int = 70
     alarm_start_volume: int = 10
     alarm_ramp_seconds: float = 90
+    # Not dismissed: every cycle is louder by the step, up to 100 %, until
+    # the routine gives up (the lights stay on).
+    alarm_cycle_seconds: float = 120
+    alarm_cycle_step: int = 10
+    alarm_give_up_minutes: float = 15
+    # After the alarm is dismissed
+    briefing_prepare_lead_minutes: float = 10  # before the alarm
+    briefing_delay_seconds: float = 300  # unless the AI button comes first
+    briefing_timeout_seconds: float = 300  # stop waiting for it to finish
+    rering_after_seconds: float = 600  # without a second input
+    rering_max: int = 2
+    # Input this soon after dismissing is the same press (moment buttons
+    # send press and release), not proof of being awake.
+    activity_min_gap_seconds: float = 5
     # An alarm missed by up to this much (daemon restart) still rings.
     late_start_grace_minutes: int = 15
 

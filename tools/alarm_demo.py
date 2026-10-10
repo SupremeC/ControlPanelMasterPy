@@ -21,8 +21,9 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from daemon.audio_ctrl import AudioCtrl, SysAudioEvent, alarm_ramp_level  # noqa: E402
+from daemon.audio_ctrl import AudioCtrl, SysAudioEvent  # noqa: E402
 from daemon.config import Config  # noqa: E402
+from daemon.morning import alarm_ramp_level  # noqa: E402
 
 CHIMES = {"off": SysAudioEvent.CHIME_OFF, "speak": SysAudioEvent.CHIME_SPEAK}
 

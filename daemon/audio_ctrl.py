@@ -25,16 +25,6 @@ ALARM_CHANNEL = 1  # reserved, so system sounds never cut the alarm off
 ALARM_FADEOUT_MS = 500
 
 
-def alarm_ramp_level(elapsed: float, seconds: float, start: int, end: int) -> int:
-    """Alarm level (percent) `elapsed` seconds into a ramp from start to
-    end. The level rises by the same factor every second, which sounds
-    like an even rise; a straight line would jump at first, then stall."""
-    if seconds <= 0 or elapsed >= seconds:
-        return end
-    t = max(elapsed, 0) / seconds
-    return round(start * (end / start) ** t)
-
-
 @unique
 class SysAudioEvent(IntEnum):
     """SysAudioEvent"""

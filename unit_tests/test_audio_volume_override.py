@@ -8,7 +8,8 @@ channels and sound library that start() would create are set by hand.
 import unittest
 import unittest.mock as mock
 
-from daemon.audio_ctrl import AudioCtrl, SysAudioEvent, alarm_ramp_level
+from daemon.audio_ctrl import AudioCtrl, SysAudioEvent
+from daemon.morning import alarm_ramp_level
 
 
 class AudioTestCase(unittest.TestCase):
