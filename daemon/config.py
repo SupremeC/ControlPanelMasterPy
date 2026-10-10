@@ -121,7 +121,7 @@ class Config:
     # The same light as the WLED preset "Lowred": both segments on, no
     # effect. Set with WLED.set_both(), like the sunrise frames.
     night_strip_rgbw: tuple[int, int, int, int] = (255, 0, 34, 0)
-    night_strip_brightness: int = 64
+    night_strip_brightness: int = 40  # 64 was slightly too bright (2026-10-10)
     night_strip_transition: float = 5  # seconds of fade
     night_tick_seconds: float = 30
 
