@@ -95,6 +95,7 @@ class ControlPanel:
             lambda minutes: self._events.put(SunriseDue(minutes)),
             token_file=self._config.google_token_file,
             update_interval=self._config.calendar_update_interval,
+            config=self._config,
         )
         self.ai = OpenAiWrapper(key_path=self._config.openai_key_file)
         self._audioctrl: AudioCtrl = AudioCtrl(
@@ -544,11 +545,13 @@ class ControlPanel:
         self._audioctrl.play_bytes(self.ai.audio)
 
     def _tell_upcoming_events(self) -> None:
-        self.ai.upcomingEvents(self.cal.get_todays_events())
+        self.cal.fetch()
+        self.ai.upcomingEvents(self.cal.todays_events())
         self._audioctrl.play_bytes(self.ai.audio)
 
     def _morning_briefing(self) -> None:
-        self.ai.morningBreifing(self.cal.get_todays_events())
+        self.cal.fetch()
+        self.ai.morningBreifing(self.cal.todays_events())
         self._audioctrl.play_bytes(self.ai.audio)
 
     def speakerLeds(self, on: bool) -> None:

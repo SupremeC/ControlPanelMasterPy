@@ -178,7 +178,7 @@ class TestAlarmFlow(EventLoopTestCase):
         # assert
         self.assertTrue(self.process_until(lambda: self.cp._ai_job.done()))
         self.cp.ai.morningBreifing.assert_called_once_with(
-            self.cp.cal.get_todays_events.return_value
+            self.cp.cal.todays_events.return_value
         )
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
 
@@ -200,7 +200,7 @@ class TestAiButton(EventLoopTestCase):
     def test_failure_playsFailedAndStopsBlink(self):
         # arrange
         btn = mock.MagicMock()
-        self.cp.cal.get_todays_events.side_effect = RuntimeError("no network")
+        self.cp.cal.fetch.side_effect = RuntimeError("no network")
 
         # act
         with self.assertLogs("daemon.ctrlPanel", "ERROR"):

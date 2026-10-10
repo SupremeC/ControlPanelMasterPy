@@ -138,7 +138,7 @@ class TestCalendarLifecycle(unittest.TestCase):
         cal.stop()
         cal.stop()
 
-    @mock.patch.object(Calender, "get_todays_events", return_value=[])
+    @mock.patch.object(Calender, "fetch", return_value=False)
     def test_stop_wakesThreadDuringUpdateInterval(self, _get_events):
         # arrange
         cal = Calender(None, None)
@@ -176,10 +176,11 @@ class TestCalendarTokens(unittest.TestCase):
 
         # act
         with self.assertLogs("daemon.gCalender", "ERROR"):
-            events = cal.get_todays_events()
+            ok = cal.fetch()
 
         # assert: no browser login, no API call
-        self.assertEqual([], events)
+        self.assertFalse(ok)
+        self.assertEqual([], cal.todays_events())
         mock_build.assert_not_called()
 
     @mock.patch("daemon.gCalender.Credentials.from_authorized_user_file")

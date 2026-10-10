@@ -16,8 +16,43 @@ from daemon.config import Config
 
 logger = logging.getLogger("daemon.gCalender")
 
+TIMEZONE = pytz.timezone("Europe/Stockholm")
+MAX_EVENTS = 50  # per fetch; the window is today and tomorrow
+
+
+def _local_now() -> datetime.datetime:
+    return datetime.datetime.now(TIMEZONE)
+
+
+def _local_midnight(day: datetime.date) -> datetime.datetime:
+    return TIMEZONE.localize(datetime.datetime.combine(day, datetime.time()))
+
+
+def _next_at(now: datetime.datetime, at: datetime.time) -> datetime.datetime:
+    """The first local time `at` after now."""
+    due = TIMEZONE.localize(datetime.datetime.combine(now.date(), at))
+    if due <= now:
+        due = TIMEZONE.localize(
+            datetime.datetime.combine(now.date() + datetime.timedelta(days=1), at)
+        )
+    return due
+
 
 class Calender:
+    """Today's and tomorrow's events from the primary Google calendar.
+
+    A thread refetches them: every `refetch_near` seconds from
+    `refetch_near_from` (local time) until today's alarm has rung, every
+    `refetch_far` seconds otherwise. An event titled `alarm_title`
+    (case-insensitive, with a time of day) is a wake-up alarm; next_alarm()
+    returns the next one. At `alarm_check_at` the log says whether tomorrow
+    has an alarm.
+
+    The thread also fires the old callbacks: on_sunrise(minutes) when the
+    next alarm is `sunrise_minutes` away and on_alarm() when it is due.
+    They go away when MorningRoutine owns the timing.
+    """
+
     THREAD_JOIN_TIMEOUT = 2  # seconds
 
     def __init__(
@@ -26,23 +61,39 @@ class Calender:
         p_callback_sr: Callable[[int], None],
         token_file: Path = Config.google_token_file,
         update_interval: float = Config.calendar_update_interval,
+        config: Config | None = None,
+        now: Callable[[], datetime.datetime] = _local_now,
     ):
+        cfg = config or Config()
         self._token_file = token_file
         self.UPDATE_INTERVAL = update_interval
+        self._alarm_title = cfg.alarm_title.casefold()
+        self._refetch_near = datetime.timedelta(seconds=cfg.calendar_refetch_near)
+        self._refetch_far = datetime.timedelta(seconds=cfg.calendar_refetch_far)
+        self._refetch_near_from: datetime.time = cfg.calendar_refetch_near_from
+        self._alarm_check_at: datetime.time = cfg.alarm_check_at
+        self._sunrise = datetime.timedelta(minutes=cfg.sunrise_minutes)
+        self._late_grace = datetime.timedelta(minutes=cfg.late_start_grace_minutes)
+        self._now = now
         # If modifying these scopes, delete the file token.json.
         self.SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
         self.creds = None
-        self.alarmName: str = "wakeUpAlarm"
-        self.time_to_update_utc: datetime.datetime = None
-        self.events: List[CEvent] = []
-        self.alarm: CEvent = None
+        # Replaced as a whole by fetch(), so readers on other threads
+        # always see one consistent download.
+        self._events: List[CEvent] = []
+        self._alarms: List[datetime.datetime] = []
+        self._fetch_lock = threading.Lock()
+        self._next_fetch: datetime.datetime | None = None
+        self._checked_tomorrow: datetime.date | None = None
+        self._sunrise_fired: datetime.datetime | None = None
+        self._alarm_fired: datetime.datetime | None = None
         self.on_alarm = p_callback_alarm
         self.on_sunrise = p_callback_sr
         self._stop_event = threading.Event()
         self.cal_updater_thread: threading.Thread | None = None
 
     def start(self) -> None:
-        """Starts the thread that downloads today's events and fires
+        """Starts the thread that refetches the events and fires
         the sunrise and alarm callbacks."""
         if self.cal_updater_thread is not None:
             return
@@ -62,121 +113,130 @@ class Calender:
             self.cal_updater_thread.join(self.THREAD_JOIN_TIMEOUT)
         self.cal_updater_thread = None
 
-    def upcoming_events_today(self) -> List[CEvent]:
-        if self.events is None:
-            return []
-        return [
-            obj
-            for obj in self.events
-            if obj.start
-            > (
-                datetime.datetime.now(datetime.timezone.utc)
-                - datetime.timedelta(hours=1)
-            )
-        ]
+    def todays_events(self) -> List[CEvent]:
+        """Today's events from the last fetch, alarms left out."""
+        today = self._now().date()
+        return [e for e in self._events if e.start.date() == today]
+
+    def next_alarm(
+        self, not_before: datetime.datetime | None = None
+    ) -> datetime.datetime | None:
+        """Start of the first alarm at or after not_before (default now),
+        from the last fetch. None if today and tomorrow have none."""
+        not_before = not_before or self._now()
+        return next((a for a in self._alarms if a >= not_before), None)
 
     def __cal_update(self) -> None:
-        """Downloads todays calender events/alarm"""
         while not self._stop_event.is_set():
-            swedish_timezone = pytz.timezone("Europe/Stockholm")
             try:
-                current_time = datetime.datetime.now(swedish_timezone)
-                current_time_utc = datetime.datetime.now(datetime.timezone.utc)
-                if (
-                    self.time_to_update_utc is None
-                    or current_time_utc >= self.time_to_update_utc
-                ):
-                    self.events = self.get_todays_events()
-                    self.time_to_update_utc = self._next_update_utc()
-
-                if (
-                    self.alarm is not None
-                    and self.alarm.has_time
-                    and not self.alarm.reminder_done
-                ):
-                    if current_time > self.alarm.start - datetime.timedelta(
-                        minutes=self.alarm.reminder
-                    ):
-                        self.alarm.reminder_done = True
-                        self.on_sunrise(self.alarm.reminder)
-                if self.alarm is not None and self.alarm.has_time:
-                    if current_time > self.alarm.start:
-                        self.alarm = None
-                        self.on_alarm()
+                self._update()
             except Exception:
                 logger.exception("Calendar update failed")
             self._stop_event.wait(self.UPDATE_INTERVAL)
 
-    def get_todays_events(self) -> List[CEvent]:
-        if not self.refresh_tokens():
-            return []
-        try:
-            # Set the timezone to Stockholm, Sweden
-            swedish_timezone = pytz.timezone("Europe/Stockholm")
-            service = build("calendar", "v3", credentials=self.creds)
+    def _update(self) -> None:
+        """One round of the thread: refetch if due, then the 21:00 check
+        and the old callbacks."""
+        now = self._now()
+        if self._next_fetch is None or now >= self._next_fetch:
+            fetched = self.fetch()
+            self._next_fetch = self._next_fetch_time(now)
+            if fetched:
+                self._check_tomorrow(now)
+        self._fire_callbacks(now)
 
-            # Call the Calendar API
-            # now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            logger.debug("Getting todays first 10 events")
-            events_result = (
-                service.events()
-                .list(
-                    calendarId="primary",
-                    timeMin=Calender.start_of_today_utc(),
-                    timeMax=Calender.end_of_today_utc(),
-                    maxResults=10,
-                    singleEvents=True,
-                    orderBy="startTime",
+    def _next_fetch_time(self, now: datetime.datetime) -> datetime.datetime:
+        """15 min from 04:00 until today's alarm has rung, 2 h otherwise.
+        Never later than the next 04:00 or 21:00, so both start fresh."""
+        rung_today = any(
+            a.date() == now.date() and a <= now for a in self._alarms
+        )
+        near = now.time() >= self._refetch_near_from and not rung_today
+        due = now + (self._refetch_near if near else self._refetch_far)
+        return min(
+            due,
+            _next_at(now, self._refetch_near_from),
+            _next_at(now, self._alarm_check_at),
+        )
+
+    def _check_tomorrow(self, now: datetime.datetime) -> None:
+        """Once a day, from 21:00: log tomorrow's alarm or warn there is none."""
+        tomorrow = now.date() + datetime.timedelta(days=1)
+        if now.time() < self._alarm_check_at or self._checked_tomorrow == tomorrow:
+            return
+        self._checked_tomorrow = tomorrow
+        alarm = next((a for a in self._alarms if a.date() == tomorrow), None)
+        if alarm is None:
+            logger.warning("No wake-up alarm in the calendar for tomorrow %s", tomorrow)
+        else:
+            logger.info("Wake-up alarm tomorrow at %s", alarm.strftime("%H:%M"))
+
+    def _fire_callbacks(self, now: datetime.datetime) -> None:
+        # An alarm that is a little overdue (slow refetch, daemon restart)
+        # still rings.
+        alarm = self.next_alarm(now - self._late_grace)
+        if alarm is None:
+            return
+        if self._sunrise_fired != alarm and alarm - self._sunrise <= now < alarm:
+            self._sunrise_fired = alarm
+            self.on_sunrise(int(self._sunrise.total_seconds() // 60))
+        if self._alarm_fired != alarm and now >= alarm:
+            self._alarm_fired = alarm
+            self.on_alarm()
+
+    def fetch(self) -> bool:
+        """Downloads today's and tomorrow's events. Blocking. On failure
+        the events from the last fetch are kept and False is returned."""
+        with self._fetch_lock:
+            if not self.refresh_tokens():
+                return False
+            today = self._now().date()
+            try:
+                service = build("calendar", "v3", credentials=self.creds)
+                items = (
+                    service.events()
+                    .list(
+                        calendarId="primary",
+                        timeMin=_local_midnight(today).isoformat(),
+                        timeMax=_local_midnight(
+                            today + datetime.timedelta(days=2)
+                        ).isoformat(),
+                        maxResults=MAX_EVENTS,
+                        singleEvents=True,
+                        orderBy="startTime",
+                    )
+                    .execute()
+                    .get("items", [])
                 )
-                .execute()
+            except HttpError as error:
+                logger.error("Fetching calendar events failed: %s", error)
+                return False
+            events = [e for e in map(self._parse_event, items) if e is not None]
+            self._events = [e for e in events if not e.is_alarm]
+            self._alarms = sorted(e.start for e in events if e.is_alarm)
+            logger.info(
+                "downloaded %d calendar events, alarms: %s",
+                len(self._events),
+                [a.strftime("%a %H:%M") for a in self._alarms],
             )
-            events = events_result.get("items", [])
+            return True
 
-            if not events:
-                logger.debug("No upcoming events found for today.")
-                return None
-
-            self.alarm = None
-            items = list()
-            for event in events:
-                start = Calender.parse_event_date(event["start"].get("dateTime"))
-                if start is None or start[0] is None:
-                    start = Calender.parse_event_date(event["start"].get("date"))
-                rminutes = 16
-                s = event["summary"]
-                descr = (
-                    "" if event.get("description") is None else event.get("description")
-                )
-                loc = event.get("location")
-                alarm = True if event["summary"] == self.alarmName else False
-                if event["reminders"] is not None:
-                    if (event["reminders"].get("overrides")) is not None:
-                        for re in event["reminders"].get("overrides"):
-                            minutes = int(re.get("minutes"))
-                            rminutes = max(rminutes, minutes)
-                e = CEvent(
-                    start=start[0],
-                    reminder=rminutes,
-                    summary=s,
-                    descr=descr,
-                    location=loc,
-                    is_alarm=alarm,
-                    has_time=start[1],
-                    reminder_done=False,
-                )
-                if not e.is_alarm:
-                    items.append(e)
-                if (
-                    e.is_alarm
-                    and e.has_time
-                    and datetime.datetime.now(swedish_timezone) < e.start
-                ):
-                    self.alarm = e
-            self.events = items
-            logger.info(f"downloaded {len(items)} calender events")
-            return items
-        except HttpError as error:
-            logger.error(f"An error occurred: {error}")
+    def _parse_event(self, event: dict) -> CEvent | None:
+        start, has_time = Calender.parse_event_date(event["start"].get("dateTime"))
+        if start is None:
+            start, has_time = Calender.parse_event_date(event["start"].get("date"))
+        if start is None:
+            return None
+        summary = event.get("summary", "")
+        return CEvent(
+            start=start,
+            summary=summary,
+            descr=event.get("description") or "",
+            location=event.get("location"),
+            # An all-day event cannot wake anyone.
+            is_alarm=has_time and summary.strip().casefold() == self._alarm_title,
+            has_time=has_time,
+        )
 
     def refresh_tokens(self) -> bool:
         """Loads the Google tokens from token.json and refreshes them if
@@ -216,47 +276,18 @@ class Calender:
         )
         return False
 
+    @staticmethod
     def parse_event_date(date_as_str: str) -> tuple[datetime.datetime, bool]:
+        """Returns (start, has_time). All-day dates become local midnight,
+        so every start is timezone-aware and comparable."""
         try:
             if date_as_str is None:
                 return (None, False)
             if len(date_as_str) == 10:  # yyyy-mm-dd
-                date = datetime.datetime.strptime(date_as_str, "%Y-%m-%d")
-                return (date, False)
-            else:
-                date = datetime.datetime.fromisoformat(date_as_str)
-                return (date, True)
+                day = datetime.date.fromisoformat(date_as_str)
+                return (_local_midnight(day), False)
+            start = datetime.datetime.fromisoformat(date_as_str)
+            return (start.astimezone(TIMEZONE), True)
         except Exception as e:
             logger.error(e)
             return (None, False)
-
-    def start_of_today_utc():
-        now = datetime.datetime.now(datetime.timezone.utc)
-        # Set the time to 00:00:00 (start of the day) while keeping the date
-        start_of_today = now.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).isoformat()
-        return start_of_today
-
-    def end_of_today_utc() -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        # Calculate the start of tomorrow in UTC
-        start_of_tomorrow = (now + datetime.timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        # Subtract 1 microsecond to get the end of today (23:59:59.999999)
-        end_of_today = start_of_tomorrow - datetime.timedelta(microseconds=1)
-        return end_of_today.isoformat()
-
-    def _next_update_utc(self, h: int = 2) -> datetime.datetime:
-        """Returns datetime of the next time to update"""
-        return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-            hours=h
-        )
-        time_for_update = datetime.datetime.now(datetime.timezone.utc).replace(
-            hour=5, minute=0, second=0, microsecond=0
-        )
-        # Ensure the first call happens tomorrow if it has passed today
-        if datetime.datetime.now(datetime.timezone.utc) > time_for_update:
-            time_for_update += datetime.timedelta(days=1)
-        return time_for_update

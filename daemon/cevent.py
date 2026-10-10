@@ -5,14 +5,12 @@ from datetime import datetime
 @dataclass
 class CEvent:
     start: datetime
-    reminder: int
-    reminder_done: bool
     summary: str
     descr: str
     location: str
     is_alarm: bool
     has_time: bool
-    """True == Full day event"""
+    """False == all-day event"""
 
     def __str__(self) -> str:
         msg = f"{self.summary} {self.descr} "

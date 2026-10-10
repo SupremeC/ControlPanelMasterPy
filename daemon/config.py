@@ -2,6 +2,7 @@
 the daemon does not depend on the directory it is started from."""
 
 from dataclasses import dataclass
+import datetime
 import logging
 from pathlib import Path
 
@@ -31,7 +32,22 @@ class Config:
     wled_port: str = "/dev/serial0"
     wled_baud: int = 460800
 
-    calendar_update_interval: float = 60  # seconds
+    # Google Calendar. An event with this title (any case) and a time of
+    # day is the wake-up alarm; without one there is no alarm.
+    alarm_title: str = "wakeUpAlarm"
+    calendar_update_interval: float = 60  # seconds between checks
+    # Events are refetched often from this local time until today's alarm
+    # has rung, so a moved or deleted alarm is seen in time; seldom otherwise.
+    calendar_refetch_near_from: datetime.time = datetime.time(4, 0)
+    calendar_refetch_near: float = 15 * 60  # seconds
+    calendar_refetch_far: float = 2 * 60 * 60  # seconds
+    # From this local time the log says whether tomorrow has an alarm.
+    alarm_check_at: datetime.time = datetime.time(21, 0)
+
+    # Morning routine
+    sunrise_minutes: int = 30
+    # An alarm missed by up to this much (daemon restart) still rings.
+    late_start_grace_minutes: int = 15
 
     # Secrets live in daemon/ and are gitignored (the repo is public).
     openai_key_file: Path = DAEMON_DIR / "cpanel-openai-service-account.secretkey"
