@@ -33,16 +33,28 @@ class Calender:
         self.on_alarm = p_callback_alarm
         self.on_sunrise = p_callback_sr
         self._stop_event = threading.Event()
+        self.cal_updater_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Starts the thread that downloads today's events and fires
+        the sunrise and alarm callbacks."""
+        if self.cal_updater_thread is not None:
+            return
+        self._stop_event.clear()
         self.cal_updater_thread = threading.Thread(
             target=self.__cal_update, name="calendar", daemon=True
         )
         self.cal_updater_thread.start()
 
     def stop(self) -> None:
-        """Stop Calender from updating itself. Safe to call more than once."""
+        """Stop Calender from updating itself. Safe to call more than once,
+        and before start()."""
         self._stop_event.set()
+        if self.cal_updater_thread is None:
+            return
         if self.cal_updater_thread.is_alive():
             self.cal_updater_thread.join(self.THREAD_JOIN_TIMEOUT)
+        self.cal_updater_thread = None
 
     def upcoming_events_today(self) -> List[CEvent]:
         if self.events is None:

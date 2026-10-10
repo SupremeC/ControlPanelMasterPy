@@ -91,12 +91,18 @@ class AudioCtrl:
         self.rec_time = None
         self._current_filepath = None
         self.alarm_sound: mixer.Sound | None = None
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
 
+    def start(self) -> None:
+        """Opens the audio mixer, loads the system sounds and starts
+        the playback monitor thread."""
+        if self._thread is not None:
+            return
         # init() 'channels' refers to mono vs stereo, not playback Channel object
         mixer.init(48000, -16, channels=1, buffer=1024)
         mixer.set_num_channels(6)
         mixer.set_reserved(1)
-        mixer.get_busy
         self.rec_channel = mixer.Channel(0)
         audioclipsfound = self.__load_sound_library(self.__systemsoundsdir)
         self.enable_sound(True)
@@ -104,17 +110,22 @@ class AudioCtrl:
 
         logger.info("Found %d audio clips", audioclipsfound)
 
-        self._running = True  # Internal flag to control the thread's lifecycle
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self.__playback_monitor, name="audio-monitor", daemon=True
         )
         self._thread.start()
 
     def stop(self) -> None:
-        """Stops the playback monitor thread. Safe to call more than once."""
-        self._running = False
+        """Stops the playback monitor thread and closes the mixer.
+        Safe to call more than once, and before start()."""
+        self._stop_event.set()
+        if self._thread is None:
+            return
         if self._thread.is_alive():
             self._thread.join(1)
+        self._thread = None
+        mixer.quit()
 
     @property
     def current_filepath(self):
@@ -358,14 +369,14 @@ class AudioCtrl:
             self.rec_ctrl.rec_filename = None
 
     def __playback_monitor(self) -> None:
-        while self._running:
+        while not self._stop_event.is_set():
             if mixer.get_busy() and not self.playing:
                 self.playing = True
                 self.on_play_change(True)
             elif not mixer.get_busy() and self.playing:
                 self.playing = False
                 self.on_play_change(False)
-            time.sleep(0.3)
+            self._stop_event.wait(0.3)
 
     def __build_tmp_filename(self, suffix) -> str:
         prefix = datetime.datetime.now().strftime("%y%m%d_%H%M%S")

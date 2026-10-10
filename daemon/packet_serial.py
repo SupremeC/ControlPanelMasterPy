@@ -2,7 +2,6 @@
 
 import logging
 import threading
-import time
 from queue import Empty, Full, Queue
 import serial
 import serial.tools.list_ports
@@ -19,13 +18,18 @@ class PacketSerial:
     """Wraps serialOverUSB connection to add support for
     async reading and writing of Packets.
 
+    start() tries to open the port once, then a reader thread keeps
+    retrying every RECONNECT_INTERVAL seconds until the Mega shows up,
+    and reconnects if the USB connection is lost. Outgoing packets are
+    dropped while the Mega is not connected.
+
     Returns:
         PacketSerial: instance
     """
 
     @property
-    def port(self) -> str:
-        """Read the current port name
+    def port(self) -> str | None:
+        """Name of the port the Mega was last found on, or None.
 
         Returns:
             str: Port name
@@ -39,22 +43,25 @@ class PacketSerial:
         Returns:
             bool: Is the damn port open or not
         """
-        return False if self._ser is None else self._ser.is_open
+        ser = self._ser
+        return False if ser is None else ser.is_open
 
     BAUDRATE = 115200
     PACKET_DEVIDER = b"\x00"
     STORE_X_PACKETS_IN_HISTORY = 10
     THREAD_JOIN_TIMEOUT = 2  # seconds
+    RECONNECT_INTERVAL = 5  # seconds
+    READ_TIMEOUT = 1  # seconds, so read_until() never blocks forever
 
     def __init__(self, rqueue: Queue, squeue: Queue):
-        self._port = self.find_port_to_arduino()
+        self._port = None
         self._ser = None
         self._received_queue = rqueue
         self._send_queue = squeue
-        self._rshutdown_flag = threading.Event()
-        self._sshutdown_flag = threading.Event()
+        self._stop_event = threading.Event()
         self._readserial_thread = None
         self._writeserial_thread = None
+        self._reported_missing = False
         self.last_sent: list[Packet] = []
         self.last_received: list[Packet] = []
         self.throttle: SlidingWindow = SlidingWindow(55, 0.05)
@@ -70,61 +77,35 @@ class PacketSerial:
         self.throttle.limit_per_timeunit = nr_of_packets
         self.throttle.time_unit = ptime_unit
 
-    def find_port_to_arduino(self) -> str:
-        """Get the name of the port that is connected to Arduino."""
-        port = "ErrorPS.01: Arduino not found"
-        ports = serial.tools.list_ports.comports()
-        for p in ports:
-            logger.info(
-                "Found: Port:%s\tName:%s\tmf:%s\tHWID:%s",
-                p.device,
-                p.name,
-                p.manufacturer,
-                p.hwid,
-            )
+    @staticmethod
+    def find_port_to_arduino() -> str | None:
+        """Get the name of the port that is connected to Arduino, or None."""
+        for p in serial.tools.list_ports.comports():
             if p.manufacturer is not None and "Arduino" in p.manufacturer:
-                port = p.device
-        return port
+                return p.device
+        return None
 
-    def open_connection(self) -> None:
-        """Tries to open port to establish serialOverUSB connection.
-
-        On success:
-            Monitors serial input buffer on new thread
-            new Thread sends outgoing packets
-        """
-        try:
-            logger.info("PacketSerial Opening port %s", self.port)
-            self._ser = serial.Serial(port=self._port, baudrate=self.BAUDRATE)
-            logger.info("Serial port is " + "open" if self._ser.is_open else "closed")
-            if self._readserial_thread is None:
-                self._readserial_thread = threading.Thread(
-                    target=self._start_read_packets, name="serial-read", daemon=True
-                )
-            if not self._readserial_thread.is_alive():
-                self._readserial_thread.start()
-            if self._writeserial_thread is None:
-                self._writeserial_thread = threading.Thread(
-                    target=self._start_write_packets, name="serial-write", daemon=True
-                )
-            if not self._writeserial_thread.is_alive():
-                self._writeserial_thread.start()
-        except Exception as e:
-            logger.error(e)
-            # raise
-
-    def close_connection(self) -> None:
-        """Close serial connection.
-
-        Stops the 2 threads responsible for reading and writing
-        to the port first, then closes the port. Safe to call more
-        than once, and before open_connection().
-        """
-        if self._ser is None:
+    def start(self) -> None:
+        """Tries to open the port, then starts the reader thread (which
+        keeps reconnecting) and the writer thread."""
+        if self._readserial_thread is not None:
             return
-        logger.info("waiting for serial worker threads to stop...")
-        self._rshutdown_flag.set()
-        self._sshutdown_flag.set()
+        self._stop_event.clear()
+        self._open_port()
+        self._readserial_thread = threading.Thread(
+            target=self._start_read_packets, name="serial-read", daemon=True
+        )
+        self._writeserial_thread = threading.Thread(
+            target=self._start_write_packets, name="serial-write", daemon=True
+        )
+        self._readserial_thread.start()
+        self._writeserial_thread.start()
+
+    def stop(self) -> None:
+        """Stops the reader and writer threads, then closes the port.
+        Safe to call more than once, and before start().
+        """
+        self._stop_event.set()
         for thread in (self._readserial_thread, self._writeserial_thread):
             if thread is not None and thread.is_alive():
                 thread.join(self.THREAD_JOIN_TIMEOUT)
@@ -132,12 +113,41 @@ class PacketSerial:
                     logger.error("%s is still alive", thread.name)
         self._readserial_thread = None
         self._writeserial_thread = None
+        if self._ser is not None:
+            self._close_port()
+            logger.info("PacketSerial: port closed")
+
+    def _open_port(self) -> bool:
+        """Finds the Mega and opens its port. Logs a missing Mega only
+        once, not on every retry. Returns True if the port is open."""
+        port = self.find_port_to_arduino()
+        if port is None:
+            if not self._reported_missing:
+                logger.warning(
+                    "Arduino not found. Retrying every %g s", self.RECONNECT_INTERVAL
+                )
+                self._reported_missing = True
+            return False
         try:
-            self._ser.close()
-        except serial.SerialException:
+            self._ser = serial.Serial(
+                port=port, baudrate=self.BAUDRATE, timeout=self.READ_TIMEOUT
+            )
+        except (serial.SerialException, OSError) as e:
+            if not self._reported_missing:
+                logger.error("Opening %s failed: %s. Retrying", port, e)
+                self._reported_missing = True
+            return False
+        self._port = port
+        self._reported_missing = False
+        logger.info("PacketSerial: port %s open", port)
+        return True
+
+    def _close_port(self) -> None:
+        ser, self._ser = self._ser, None
+        try:
+            ser.close()
+        except (serial.SerialException, OSError):
             logger.exception("Closing serial port failed")
-        self._ser = None
-        logger.info("PacketSerial: port closed")
 
     def send_hello(self) -> None:
         """Sends a Hello packet to ArduinoMega. Hopefully
@@ -157,79 +167,72 @@ class PacketSerial:
             logger.error(e)
 
     def _start_read_packets(self) -> None:
-        """Monitors Serial connection for new data.
+        """Keeps the connection open and monitors it for new data.
         Should be run in a dedicated thread.
 
         When data is read, it is parsed into Packets
         """
-        while not self._rshutdown_flag.is_set():
-            if self._ser is None:
-                logger.error("cannot read Serial when connection=None")
-                break
-            if not self._ser.is_open:
-                logger.error("cannot read Serial when connection is closed")
-                break
+        while not self._stop_event.is_set():
+            if self._ser is None and not self._open_port():
+                self._stop_event.wait(self.RECONNECT_INTERVAL)
+                continue
             try:
-                while self._ser.in_waiting > 1:
-                    # read until 'devider' (included) and remove
-                    # last byte (packet devider byte)
-                    rbytes = self._ser.read_until(self.PACKET_DEVIDER)[:-1]
-                    p = PacketSerial.decode_packet(rbytes)
-                    if (
-                        p.hw_event != HWEvent.LOOPDURATION
-                        and p.hw_event != HWEvent.NOOP
-                    ):
-                        self._received_queue.put_nowait(p)
-                        self._log_packet(p, True)
-                time.sleep(0.05)
-            except (TimeoutError, Full, cobs.DecodeError) as e:
-                logger.error(e)
-            except cobs.DecodeError:
-                logger.error("invalid packet")
-        self._rshutdown_flag.clear()
+                self._read_available_packets()
+            except (serial.SerialException, OSError) as e:
+                logger.error("Serial connection lost: %s", e)
+                self._close_port()
+                continue
+            except (Full, cobs.DecodeError) as e:
+                logger.error("invalid packet: %s", e)
+            except Exception:
+                logger.exception("Unexpected error while reading packets")
+            self._stop_event.wait(0.05)
+
+    def _read_available_packets(self) -> None:
+        ser = self._ser
+        while ser.in_waiting > 1:
+            # read until 'devider' (included) and remove
+            # last byte (packet devider byte)
+            rbytes = ser.read_until(self.PACKET_DEVIDER)[:-1]
+            p = PacketSerial.decode_packet(rbytes)
+            if p.hw_event != HWEvent.LOOPDURATION and p.hw_event != HWEvent.NOOP:
+                self._received_queue.put_nowait(p)
+                self._log_packet(p, True)
 
     def _start_write_packets(self) -> None:
         """Monitors Send Queue for new data.
         Should be run in a dedicated thread.
 
         Will send all packets until Queue is empty.
-        If throttled <see throttle>, it will sleep and try again
+        If throttled <see throttle>, it will wait and try again
         later.
         """
-        while not self._sshutdown_flag.is_set():
+        while not self._stop_event.is_set():
             if self._send_queue.qsize() > 0:
                 if not self.throttle.ok_to_send():
-                    time.sleep(self.throttle.time_unit * 0.4)
+                    self._stop_event.wait(self.throttle.time_unit * 0.4)
                     continue
                 try:
                     packet = self._send_queue.get_nowait()
                     self._send_queue.task_done()
                     if packet is not None:
                         self.__send_packet(packet)
-                    time.sleep(0.05)
+                    self._stop_event.wait(0.05)
                 except Empty:
                     pass
-                except (
-                    TypeError,
-                    serial.SerialTimeoutException,
-                    serial.SerialException,
-                ) as e:
-                    logger.error("Failed to send packet. Error as follows...")
-                    logger.error(e)
+                except (TypeError, serial.SerialException, OSError) as e:
+                    logger.error("Failed to send packet: %s", e)
             else:
-                time.sleep(0.1)
-        self._sshutdown_flag.clear()
+                self._stop_event.wait(0.1)
 
     def __send_packet(self, packet: Packet) -> None:
-        if self._ser is None:
-            logger.error("cannot send Packet when connection=None")
-            return
-        if not self._ser.is_open:
-            logger.error("cannot send Packet when connection is closed")
+        ser = self._ser
+        if ser is None or not ser.is_open:
+            logger.debug("Mega not connected. Dropped %s", packet)
             return
         encoded_bytes = PacketSerial.encode_packet(packet)
-        self._ser.write(encoded_bytes)
-        self._ser.write(self.PACKET_DEVIDER)  # packet divider
+        ser.write(encoded_bytes)
+        ser.write(self.PACKET_DEVIDER)  # packet divider
         self._log_packet(packet, False)
 
     def _log_packet(self, packet: Packet, received: bool) -> None:

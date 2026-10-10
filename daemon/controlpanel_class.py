@@ -1,5 +1,6 @@
 """ControlPanel_Class"""
 
+from contextlib import ExitStack
 import datetime
 import logging
 from queue import Empty, Full, Queue
@@ -8,6 +9,7 @@ import threading
 import time
 from typing import List
 
+from .component import Component
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
@@ -42,6 +44,7 @@ class ControlPanel:
             self._packet_receivedqueue, self._packet_sendqueue
         )
         self._stopped: bool = False
+        self._components_stack = ExitStack()
         self.demo_on: bool = False
         self.alarm_on: bool = False
         self.btnLeds: bool = True
@@ -49,37 +52,45 @@ class ControlPanel:
         self.ai = OpenAiWrapper()
         self._audioctrl: AudioCtrl = AudioCtrl(self.speakerLeds)
         self.wled_instance = WLED()
-        logger.info("ControlPanel init. Using serial Port=%s", self._pserial.port)
-        logger.info(self.wled_instance)
+
+    def _components(self) -> list[tuple[str, Component]]:
+        """Components in start order. The calendar comes last because
+        its callbacks use audio and WLED."""
+        return [
+            ("serial", self._pserial),
+            ("wled", self.wled_instance),
+            ("audio", self._audioctrl),
+            ("calendar", self.cal),
+        ]
 
     def start(self):
-        """Opens serial connection and start Read and Write worker threads"""
-        try:
-            self.reset()
-            self._pserial.open_connection()
-        except Exception as e:
-            logger.error(e)
+        """Starts all components. If one fails to start, the ones
+        already started are stopped again and the error is raised."""
+        with ExitStack() as stack:
+            for name, component in self._components():
+                logger.debug("Starting %s", name)
+                component.start()
+                stack.callback(self._stop_component, name, component)
+            self._components_stack = stack.pop_all()
+        self.reset()
 
     def stop(self):
-        """Closes serial connection and does general cleanup.
+        """Stops all started components in reverse order.
         Safe to call more than once."""
         if self._stopped:
             return
         self._stopped = True
         logger.info("ControlPanel stopping...")
         self.demo_on = False
-        self.reset()
-        for name, stop in (
-            ("serial", self._pserial.close_connection),
-            ("wled", self.wled_instance.stop),
-            ("calendar", self.cal.stop),
-            ("audio", self._audioctrl.stop),
-        ):
-            try:
-                stop()
-            except Exception:
-                logger.exception("Stopping %s failed", name)
+        self._components_stack.close()
         logger.info("ControlPanel stopped")
+
+    @staticmethod
+    def _stop_component(name: str, component: Component) -> None:
+        try:
+            component.stop()
+        except Exception:
+            logger.exception("Stopping %s failed", name)
 
     def process(self) -> None:
         """Call this method regularly to process packets"""

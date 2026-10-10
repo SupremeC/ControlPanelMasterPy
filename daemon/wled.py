@@ -66,10 +66,11 @@ class WLED:
     """Sends commands to an WLED device via a Serial port"""
 
     THREAD_JOIN_TIMEOUT = 2  # seconds
+    RECONNECT_INTERVAL = 5  # seconds
 
     def __init__(self, uart_port: str = "/dev/serial0", baud_rate: int = 460800):
         """
-        Initialize the WLED instance.
+        Initialize the WLED instance. Opens nothing; see start().
 
         Args:
             uart_port (str): the serial port of this Raspberry pi.
@@ -80,53 +81,64 @@ class WLED:
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
         self.sunrise_thread = None
-        self.sending_thread = threading.Thread(
-            target=self._send_cmd_from_queue, name="wled-send", daemon=True
-        )
-        self.sending_thread.start()  # Start the sending thread
+        self.sending_thread = None
         self._uart_port = uart_port
         self._baud_rate = baud_rate
         self._accept_commands: bool = True
         self._ser_timeout = 2
-        self._ser = serial.Serial(
-            self._uart_port, self._baud_rate, timeout=self._ser_timeout
-        )
+        self._ser: serial.Serial | None = None
+        self._next_open_attempt = 0.0
 
-    def check_serial_connection(self):
-        try:
-            if not self._ser.is_open:
-                self._ser.open()
-                time.sleep(0.1)
-                if self._ser.is_open:
-                    logger.info(f"Established WLED connection on {self._uart_port}.")
-                else:
-                    logger.info("Failed to establish connection")
-        except serial.SerialException as e:
-            logger.error(f"Error with the serial connection: {e}")
-            try:
-                # Attempt to reestablish connection
-                ser = serial.Serial(
-                    self._uart_port, self._baud_rate, timeout=self._ser_timeout
-                )
-                time.sleep(0.1)
-                logger.info(f"Reestablished connection on {self._uart_port}.")
-                return ser
-            except serial.SerialException as e:
-                logger.info(f"Failed to reestablish connection: {e}")
-                return None
+    def start(self) -> None:
+        """Opens the UART and starts the sender thread. If the UART
+        cannot be opened, the sender retries when it has a command."""
+        if self.sending_thread is not None:
+            return
+        self._stop_event.clear()
+        self._open_port()
+        self.sending_thread = threading.Thread(
+            target=self._send_cmd_from_queue, name="wled-send", daemon=True
+        )
+        self.sending_thread.start()
 
     def stop(self) -> None:
         """Stops the sunrise and sender threads, then closes the UART.
-        Safe to call more than once."""
+        Safe to call more than once, and before start()."""
         self._stop_event.set()
         for thread in (self.sunrise_thread, self.sending_thread):
             if thread is not None and thread.is_alive():
                 thread.join(self.THREAD_JOIN_TIMEOUT)
                 if thread.is_alive():
                     logger.error("%s is still alive", thread.name)
-        if self._ser.is_open:
-            self._ser.close()
+        self.sending_thread = None
+        if self._ser is not None:
+            self._close_port()
             logger.info("WLED serial connection closed")
+
+    def _open_port(self) -> bool:
+        """Opens the UART unless it is already open. After a failure the
+        next attempt waits RECONNECT_INTERVAL seconds. True if open."""
+        if self._ser is not None:
+            return True
+        if time.monotonic() < self._next_open_attempt:
+            return False
+        try:
+            self._ser = serial.Serial(
+                self._uart_port, self._baud_rate, timeout=self._ser_timeout
+            )
+        except (serial.SerialException, OSError) as e:
+            logger.error("Opening WLED port %s failed: %s", self._uart_port, e)
+            self._next_open_attempt = time.monotonic() + self.RECONNECT_INTERVAL
+            return False
+        logger.info("WLED port %s open (%d baud)", self._uart_port, self._baud_rate)
+        return True
+
+    def _close_port(self) -> None:
+        ser, self._ser = self._ser, None
+        try:
+            ser.close()
+        except (serial.SerialException, OSError):
+            logger.exception("Closing WLED port failed")
 
     def set_wled_state(self, on: bool, segment: Optional[int] = None) -> None:
         """Set on/off state for a specific segment, or ALL
@@ -317,15 +329,18 @@ class WLED:
                 command = self.command_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
+            self.command_queue.task_done()
+            if not self._open_port():
+                logger.debug("WLED port not open. Dropped %s", command)
+                continue
             try:
-                self.check_serial_connection()
                 json_data = json.dumps(command)
                 self._ser.write((json_data + "\n").encode())
                 self._ser.flush()
-                self.command_queue.task_done()
-                time.sleep(0.01)
-            except serial.SerialException as e:
-                logger.error(f"Error sending JSON command: {e}")
+                self._stop_event.wait(0.01)
+            except (serial.SerialException, OSError) as e:
+                logger.error("Error sending JSON command: %s", e)
+                self._close_port()
 
     def _read_whole_json_message(self) -> Dict[str, Any]:
         start_time = time.time()

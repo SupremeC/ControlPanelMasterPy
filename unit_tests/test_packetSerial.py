@@ -10,7 +10,8 @@ from queue import Queue
 import time
 import unittest
 import unittest.mock as mock
-from unittest.mock import ANY
+
+import serial
 
 import daemon.packet_serial
 from daemon.packet import Packet, HWEvent
@@ -38,103 +39,183 @@ def _wait_until(predicate, timeout: float = 2.0) -> bool:
 
 @mock.patch("serial.tools.list_ports.comports", autospec=True)
 class Test_PacketSerial(unittest.TestCase):
-    def _make(self, mock_comports) -> daemon.packet_serial.PacketSerial:
-        mock_comports.return_value = _FAKE_PORTS
+    def _make(self, mock_comports, ports=_FAKE_PORTS) -> daemon.packet_serial.PacketSerial:
+        mock_comports.return_value = ports
         self._packet_receivedqueue = Queue()
         self._packet_sendqueue = Queue(30)
-        return daemon.packet_serial.PacketSerial(
+        ps = daemon.packet_serial.PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue
         )
+        ps.RECONNECT_INTERVAL = 0.05
+        self.addCleanup(ps.stop)
+        return ps
 
-    def test_SerialPort_findArduino(self, mock_comports):
-        # arrange
-        ps = self._make(mock_comports)
-
-        # act
-        port = ps.find_port_to_arduino()
-
-        # assert
-        self.assertEqual("dev5", port, "Wrong Port found")
-        self.assertEqual("dev5", ps.port)
-
-    def test_SerialPort_noArduino(self, mock_comports):
-        # arrange
-        ps = self._make(mock_comports)
-        mock_comports.return_value = _FAKE_PORTS[:-1]
-
-        # act
-        port = ps.find_port_to_arduino()
-
-        # assert
-        self.assertTrue(port.startswith("Error"))
-
-    @mock.patch("serial.Serial")
-    def test_Threading_threadskilledcorrectly(self, mock_serial, mock_comports):
-        # arrange
+    @staticmethod
+    def _fake_port(mock_serial):
         fake_port = mock_serial.return_value
         fake_port.is_open = True
         fake_port.in_waiting = 0
+        return fake_port
+
+    def test_SerialPort_findArduino(self, mock_comports):
+        # arrange
+        mock_comports.return_value = _FAKE_PORTS
+
+        # act
+        port = daemon.packet_serial.PacketSerial.find_port_to_arduino()
+
+        # assert
+        self.assertEqual("dev5", port, "Wrong Port found")
+
+    def test_SerialPort_noArduino(self, mock_comports):
+        # arrange
+        mock_comports.return_value = _FAKE_PORTS[:-1]
+
+        # act
+        port = daemon.packet_serial.PacketSerial.find_port_to_arduino()
+
+        # assert
+        self.assertIsNone(port)
+
+    @mock.patch("serial.Serial")
+    def test_constructor_opensNothing(self, mock_serial, mock_comports):
+        # act
+        ps = self._make(mock_comports)
+
+        # assert
+        mock_comports.assert_not_called()
+        mock_serial.assert_not_called()
+        self.assertIsNone(ps.port)
+        self.assertIsNone(ps._readserial_thread)
+        self.assertFalse(ps.is_conn_open)
+
+    @mock.patch("serial.Serial")
+    def test_start_opensPortAndStartsThreads(self, mock_serial, mock_comports):
+        # arrange
+        self._fake_port(mock_serial)
         ps = self._make(mock_comports)
 
         # act
-        ps.open_connection()
+        ps.start()
 
         # assert
-        mock_serial.assert_called_once_with(port="dev5", baudrate=115200)
+        mock_serial.assert_called_once_with(port="dev5", baudrate=115200, timeout=1)
+        self.assertEqual("dev5", ps.port)
         self.assertTrue(ps.is_conn_open)
         self.assertTrue(ps._readserial_thread.is_alive(), "ReadThread should be running")
         self.assertTrue(ps._writeserial_thread.is_alive(), "WriteThread should be running")
 
-        ps.close_connection()
-
-        fake_port.close.assert_called_once()
-        self.assertIsNone(ps._readserial_thread, "ReadThread should be stopped")
-        self.assertIsNone(ps._writeserial_thread, "WriteThread should be stopped")
-        self.assertFalse(ps._rshutdown_flag.is_set(), "read Flag must be reset")
-        self.assertFalse(ps._sshutdown_flag.is_set(), "write Flag must be reset")
-
     @mock.patch("serial.Serial")
-    def test_close_connection_twiceIsNoop(self, mock_serial, mock_comports):
+    def test_stop_stopsThreadsAndClosesPort(self, mock_serial, mock_comports):
         # arrange
-        fake_port = mock_serial.return_value
-        fake_port.is_open = True
-        fake_port.in_waiting = 0
+        fake_port = self._fake_port(mock_serial)
         ps = self._make(mock_comports)
-        ps.open_connection()
+        ps.start()
+        read_thread, write_thread = ps._readserial_thread, ps._writeserial_thread
 
         # act
-        ps.close_connection()
-        ps.close_connection()
+        ps.stop()
 
         # assert
         fake_port.close.assert_called_once()
-        self.assertFalse(ps.is_conn_open)
+        self.assertFalse(read_thread.is_alive())
+        self.assertFalse(write_thread.is_alive())
         self.assertIsNone(ps._readserial_thread)
         self.assertIsNone(ps._writeserial_thread)
+        self.assertFalse(ps.is_conn_open)
 
     @mock.patch("serial.Serial")
-    def test_close_connection_beforeOpenIsNoop(self, mock_serial, mock_comports):
+    def test_stop_twiceIsNoop(self, mock_serial, mock_comports):
+        # arrange
+        fake_port = self._fake_port(mock_serial)
+        ps = self._make(mock_comports)
+        ps.start()
+
+        # act
+        ps.stop()
+        ps.stop()
+
+        # assert
+        fake_port.close.assert_called_once()
+
+    @mock.patch("serial.Serial")
+    def test_stop_beforeStartIsNoop(self, mock_serial, mock_comports):
         # arrange
         ps = self._make(mock_comports)
 
         # act
-        ps.close_connection()
+        ps.stop()
 
         # assert
         mock_serial.return_value.close.assert_not_called()
         self.assertFalse(ps.is_conn_open)
 
     @mock.patch("serial.Serial")
-    def test_Threading_sendQueueIsWrittenToPort(self, mock_serial, mock_comports):
+    def test_start_withoutArduino_connectsWhenItAppears(self, mock_serial, mock_comports):
+        # arrange
+        self._fake_port(mock_serial)
+        ps = self._make(mock_comports, ports=_FAKE_PORTS[:-1])
+
+        # act
+        with self.assertLogs("daemon.PacketSerial", "WARNING") as logs:
+            ps.start()
+            self.assertTrue(_wait_until(lambda: mock_comports.call_count >= 3))
+        self.assertFalse(ps.is_conn_open)
+        mock_comports.return_value = _FAKE_PORTS
+
+        # assert
+        self.assertTrue(_wait_until(lambda: ps.is_conn_open), "never connected")
+        self.assertTrue(ps._readserial_thread.is_alive())
+        missing = [r for r in logs.output if "Arduino not found" in r]
+        self.assertEqual(1, len(missing), "a missing Mega must be logged once")
+
+    @mock.patch("serial.Serial")
+    def test_connectionLost_reconnects(self, mock_serial, mock_comports):
         # arrange
         fake_port = mock_serial.return_value
         fake_port.is_open = True
-        fake_port.in_waiting = 0
+        reads = {"n": 0}
+
+        def in_waiting():
+            reads["n"] += 1
+            if reads["n"] == 2:
+                raise serial.SerialException("device disconnected")
+            return 0
+
+        type(fake_port).in_waiting = mock.PropertyMock(side_effect=in_waiting)
+        ps = self._make(mock_comports)
+
+        # act
+        ps.start()
+
+        # assert
+        self.assertTrue(_wait_until(lambda: mock_serial.call_count >= 2), "no reconnect")
+        fake_port.close.assert_called_once()
+        self.assertTrue(_wait_until(lambda: ps.is_conn_open))
+
+    @mock.patch("serial.Serial")
+    def test_packetsAreDroppedWhileDisconnected(self, mock_serial, mock_comports):
+        # arrange
+        ps = self._make(mock_comports, ports=_FAKE_PORTS[:-1])
+        ps.start()
+
+        # act
+        self._packet_sendqueue.put(Packet(HWEvent.HELLO, 1, 1))
+
+        # assert
+        self.assertTrue(_wait_until(self._packet_sendqueue.empty), "packet never taken")
+        mock_serial.return_value.write.assert_not_called()
+        self.assertEqual([], ps.last_sent)
+
+    @mock.patch("serial.Serial")
+    def test_Threading_sendQueueIsWrittenToPort(self, mock_serial, mock_comports):
+        # arrange
+        fake_port = self._fake_port(mock_serial)
         ps = self._make(mock_comports)
         packet = Packet(HWEvent.HELLO, 33, 44)
 
         # act
-        ps.open_connection()
+        ps.start()
         try:
             self._packet_sendqueue.put(packet)
             self.assertTrue(
@@ -142,7 +223,7 @@ class Test_PacketSerial(unittest.TestCase):
                 "packet was never written to the port",
             )
         finally:
-            ps.close_connection()
+            ps.stop()
 
         # assert: COBS-encoded packet followed by the divider byte
         fake_port.write.assert_has_calls(
@@ -158,7 +239,6 @@ class Test_PacketSerial(unittest.TestCase):
         fake_port.is_open = True
         # one packet waiting, then nothing
         fake_port.in_waiting = 7
-        fake_port.read_until.return_value = b"\x03\t!\x02,\x01\x00"
 
         def read_until(*_args, **_kwargs):
             fake_port.in_waiting = 0
@@ -168,14 +248,14 @@ class Test_PacketSerial(unittest.TestCase):
         ps = self._make(mock_comports)
 
         # act
-        ps.open_connection()
+        ps.start()
         try:
             self.assertTrue(
                 _wait_until(lambda: not self._packet_receivedqueue.empty()),
                 "no packet was received",
             )
         finally:
-            ps.close_connection()
+            ps.stop()
 
         # assert
         received = self._packet_receivedqueue.get_nowait()

@@ -1,8 +1,7 @@
 """Unit tests for daemon.controlpanel_class.
 
-ControlPanel.__init__ opens the serial port, the WLED link, the audio
-mixer, Google Calendar and OpenAI, so the tests bypass the constructor
-and only exercise the pure logic.
+These tests bypass the constructor and only exercise the pure logic.
+Lifecycle tests live in test_lifecycle.py.
 """
 
 import unittest

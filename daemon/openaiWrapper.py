@@ -1,9 +1,11 @@
 import base64
 from datetime import datetime
 import logging
+from pathlib import Path
 from openai import OpenAI
 from .cevent import CEvent
 from .smhi import SMHI
+from .global_variables import root_path
 
 
 logger = logging.getLogger("daemon.openaiWrapper")
@@ -11,6 +13,7 @@ logger = logging.getLogger("daemon.openaiWrapper")
 # gpt-4o-audio-preview was retired (404 model_not_found since Sep 2026).
 # gpt-audio-1.5 is OpenAI's named successor for the gpt-4o-audio / gpt-audio line.
 OPENAI_AUDIO_MODEL = "gpt-audio-1.5"
+DEFAULT_KEY_PATH = root_path / "daemon" / "cpanel-openai-service-account.secretkey"
 
 
 class OpenAiWrapper:
@@ -20,22 +23,24 @@ class OpenAiWrapper:
 
     #### private key token:
     - Read from daemon/cpanel-openai-service-account.secretkey (gitignored)
+      on first use, not in the constructor
     """
 
     busy: bool = False
     audio: bytes | None
     """Raw audio data from last call."""
 
-    def __init__(self):
-        my_openai_key = (
-            open(
-                "/home/david/source/cpPy/ControlPanelMasterPy/daemon/cpanel-openai-service-account.secretkey"
-            )
-            .read()
-            .strip()
-        )
-        self.client = OpenAI(api_key=my_openai_key)
+    def __init__(self, key_path: Path = DEFAULT_KEY_PATH):
+        self._key_path = key_path
+        self._client: OpenAI | None = None
         self.audio: bytes = None
+
+    @property
+    def client(self) -> OpenAI:
+        """OpenAI client, created on first use."""
+        if self._client is None:
+            self._client = OpenAI(api_key=self._key_path.read_text().strip())
+        return self._client
 
     def morningBreifing(self, events: list[CEvent]) -> str:
         """Calls OpenAI with weather and calender events as input.
