@@ -138,7 +138,7 @@ class PacketSerial:
                 self._readserial_thread.join(30)
             if (
                 self._writeserial_thread is not None
-                and self._readserial_thread.is_alive()
+                and self._writeserial_thread.is_alive()
             ):
                 self._writeserial_thread.join(30)
 
