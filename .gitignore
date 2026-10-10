@@ -18,3 +18,6 @@ bin/*
 token.json
 
 ~.bashrc
+
+# SSH keys must never be committed
+SSH_Keys/
