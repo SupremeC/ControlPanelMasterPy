@@ -42,7 +42,7 @@ TODO - write text here...  Also link to other repo with final "showcase" product
 ##### Downloading and installing steps:
 1. **[Download](https://github.com/SupremeC/ControlPanelMasterPy/archive/master.zip)** the latest version of ControlPanelMasterPy.
 2.  Open the _archive_ and **extract** the contents into a folder you choose.
-3.  Install all of the dependencies using `PIP3 install xyz`
+3.  Create a virtualenv in the folder and install the dependencies: `python3 -m venv . && bin/pip install -r requirements.txt`
 4. **Launch** the daemon `python3 control_panel_daemon.py` (runs in the foreground; stop with Ctrl+C)
 > [!IMPORTANT]  
 > Arduino needs to be connected via USB and powered up before starting the ControlPaneldaemon.

@@ -21,3 +21,10 @@ token.json
 
 # SSH keys must never be committed
 SSH_Keys/
+
+# Virtualenv lives in the repo root; dependencies are in requirements.txt
+include/
+lib64
+pyvenv.cfg
+__pycache__/
+wget-log*
