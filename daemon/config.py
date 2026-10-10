@@ -2,6 +2,7 @@
 the daemon does not depend on the directory it is started from."""
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 from daemon.global_variables import root_path
@@ -12,6 +13,9 @@ DAEMON_DIR = root_path / "daemon"
 @dataclass(frozen=True)
 class Config:
     """Settings for ControlPanel and its components."""
+
+    # DEBUG adds every status packet and recording step.
+    log_level: int = logging.INFO
 
     # Arduino Mega over USB. The port is found by manufacturer name.
     mega_baud: int = 115200
@@ -31,8 +35,6 @@ class Config:
 
     # Secrets live in daemon/ and are gitignored (the repo is public).
     openai_key_file: Path = DAEMON_DIR / "cpanel-openai-service-account.secretkey"
+    # Creating a new token.json needs a browser login with the
+    # client_secret_*.json file next to it; the daemon only refreshes it.
     google_token_file: Path = DAEMON_DIR / "token.json"
-    google_client_secret_file: Path = (
-        DAEMON_DIR
-        / "client_secret_776060522090-prfipc44cc0ef87rr78rg5773an22uan.apps.googleusercontent.com.json"
-    )

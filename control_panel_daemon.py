@@ -25,6 +25,7 @@ import os
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")  # before pygame is imported
 
+from daemon.config import Config  # noqa: E402
 from daemon.setup_logger import configure_logging  # noqa: E402
 from daemon.controlpanel_class import ControlPanel  # noqa: E402
 
@@ -33,7 +34,8 @@ logger = logging.getLogger("daemon")
 
 def main() -> int:
     """Runs the control panel until SIGTERM/SIGINT. Returns the exit code."""
-    configure_logging()
+    config = Config()
+    configure_logging(config.log_level)
     stop_event = threading.Event()
 
     def on_signal(signum, _frame):
@@ -46,7 +48,7 @@ def main() -> int:
     logger.info("Starting. Process ID:%s", os.getpid())
     control_panel = None
     try:
-        control_panel = ControlPanel()
+        control_panel = ControlPanel(config)
         control_panel.start()
         logger.debug("Daemon init complete")
         while not stop_event.is_set():

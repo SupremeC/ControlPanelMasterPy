@@ -94,7 +94,6 @@ class ControlPanel:
             lambda: self._events.put(CalendarAlarm()),
             lambda minutes: self._events.put(SunriseDue(minutes)),
             token_file=self._config.google_token_file,
-            client_secret_file=self._config.google_client_secret_file,
             update_interval=self._config.calendar_update_interval,
         )
         self.ai = OpenAiWrapper(key_path=self._config.openai_key_file)

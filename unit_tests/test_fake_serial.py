@@ -137,11 +137,7 @@ class TestConfig(unittest.TestCase):
         cfg = Config()
 
         # assert
-        for path in (
-            cfg.openai_key_file,
-            cfg.google_token_file,
-            cfg.google_client_secret_file,
-        ):
+        for path in (cfg.openai_key_file, cfg.google_token_file):
             self.assertTrue(path.is_absolute())
             self.assertEqual(root_path / "daemon", path.parent)
 

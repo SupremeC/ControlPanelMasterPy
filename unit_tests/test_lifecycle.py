@@ -16,6 +16,7 @@ import unittest.mock as mock
 from pathlib import Path
 
 import serial
+from google.auth.exceptions import RefreshError
 
 from daemon.audio_ctrl import AudioCtrl
 from daemon.controlpanel_class import ControlPanel
@@ -153,6 +154,72 @@ class TestCalendarLifecycle(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 1.0)
         self.assertFalse(thread.is_alive())
         self.assertIsNone(cal.cal_updater_thread)
+
+
+class TestCalendarTokens(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.token = Path(tmp.name) / "token.json"
+
+    def _creds(self, valid=False, expired=True, refresh_error=None):
+        creds = mock.Mock(valid=valid, expired=expired, refresh_token="r")
+        creds.to_json.return_value = '{"refreshed": true}'
+        if refresh_error is not None:
+            creds.refresh.side_effect = refresh_error
+        return creds
+
+    @mock.patch("daemon.gCalender.build")
+    def test_noTokenFile_logsAndSkips(self, mock_build):
+        # arrange
+        cal = Calender(None, None, token_file=self.token)
+
+        # act
+        with self.assertLogs("daemon.gCalender", "ERROR"):
+            events = cal.get_todays_events()
+
+        # assert: no browser login, no API call
+        self.assertEqual([], events)
+        mock_build.assert_not_called()
+
+    @mock.patch("daemon.gCalender.Credentials.from_authorized_user_file")
+    def test_refreshFails_logsAndSkips(self, mock_load):
+        # arrange
+        self.token.write_text("{}")
+        mock_load.return_value = self._creds(refresh_error=RefreshError("revoked"))
+        cal = Calender(None, None, token_file=self.token)
+
+        # act
+        with self.assertLogs("daemon.gCalender", "ERROR"):
+            ok = cal.refresh_tokens()
+
+        # assert
+        self.assertFalse(ok)
+
+    @mock.patch("daemon.gCalender.Credentials.from_authorized_user_file")
+    def test_expiredToken_isRefreshedAndSaved(self, mock_load):
+        # arrange
+        self.token.write_text("{}")
+        mock_load.return_value = self._creds()
+        cal = Calender(None, None, token_file=self.token)
+
+        # act
+        ok = cal.refresh_tokens()
+
+        # assert
+        self.assertTrue(ok)
+        self.assertEqual('{"refreshed": true}', self.token.read_text())
+
+    @mock.patch("daemon.gCalender.Credentials.from_authorized_user_file")
+    def test_validToken_isUsedAsIs(self, mock_load):
+        # arrange
+        self.token.write_text("{}")
+        mock_load.return_value = self._creds(valid=True, expired=False)
+        cal = Calender(None, None, token_file=self.token)
+
+        # act / assert
+        self.assertTrue(cal.refresh_tokens())
+        mock_load.return_value.refresh.assert_not_called()
 
 
 class TestOpenAiLifecycle(unittest.TestCase):

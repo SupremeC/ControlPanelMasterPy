@@ -3,9 +3,9 @@ import threading
 import logging
 from pathlib import Path
 from typing import Callable, List
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import pytz
@@ -25,11 +25,9 @@ class Calender:
         p_callback_alarm: Callable[[], None],
         p_callback_sr: Callable[[int], None],
         token_file: Path = Config.google_token_file,
-        client_secret_file: Path = Config.google_client_secret_file,
         update_interval: float = Config.calendar_update_interval,
     ):
         self._token_file = token_file
-        self._client_secret_file = client_secret_file
         self.UPDATE_INTERVAL = update_interval
         # If modifying these scopes, delete the file token.json.
         self.SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
@@ -110,7 +108,8 @@ class Calender:
             self._stop_event.wait(self.UPDATE_INTERVAL)
 
     def get_todays_events(self) -> List[CEvent]:
-        self.refresh_tokens()
+        if not self.refresh_tokens():
+            return []
         try:
             # Set the timezone to Stockholm, Sweden
             swedish_timezone = pytz.timezone("Europe/Stockholm")
@@ -179,30 +178,43 @@ class Calender:
         except HttpError as error:
             logger.error(f"An error occurred: {error}")
 
-    def refresh_tokens(self) -> None:
+    def refresh_tokens(self) -> bool:
+        """Loads the Google tokens from token.json and refreshes them if
+        they have expired. Returns False if there are no usable tokens.
+
+        A new token.json needs a browser login (the OAuth flow with the
+        client_secret_*.json file in daemon/), which the daemon cannot do,
+        so the calendar is skipped until one is created by hand.
+        """
         self.creds = None
-        # The file token.json stores the user's access and refresh tokens, and is
-        # created automatically when the authorization flow completes for the first
-        # time.
         if self._token_file.exists():
             self.creds = Credentials.from_authorized_user_file(
                 str(self._token_file), self.SCOPES
             )
-        # If there are no (valid) credentials available, let the user log in.
-        if not self.creds or not self.creds.valid:
-            logger.warning("Google Calender credentials(tokens) expired or not valid")
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                logger.info("refreshing Google credential tokens")
+        if self.creds and self.creds.valid:
+            return True
+        if self.creds and self.creds.expired and self.creds.refresh_token:
+            logger.info("refreshing Google credential tokens")
+            try:
                 self.creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(self._client_secret_file), self.SCOPES
+            except RefreshError as e:
+                logger.error(
+                    "Google token refresh failed (%s). Calendar skipped until "
+                    "a new %s is created with a browser login",
+                    e,
+                    self._token_file,
                 )
-                logger.warning("User input needed to refresh tokens")
-                self.creds = flow.run_local_server(port=0)
+                return False
             # Save the credentials for the next run
             with open(self._token_file, "w") as token:
                 token.write(self.creds.to_json())
+            return True
+        logger.error(
+            "No usable Google token in %s. Calendar skipped until a new one "
+            "is created with a browser login",
+            self._token_file,
+        )
+        return False
 
     def parse_event_date(date_as_str: str) -> tuple[datetime.datetime, bool]:
         try:
