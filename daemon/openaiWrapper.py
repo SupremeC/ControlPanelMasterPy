@@ -26,7 +26,6 @@ class OpenAiWrapper:
       on first use, not in the constructor
     """
 
-    busy: bool = False
     audio: bytes | None
     """Raw audio data from last call."""
 
@@ -50,17 +49,9 @@ class OpenAiWrapper:
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
-        if self.busy:
-            return
-        try:
-            self.busy = True
-            weather = SMHI.get_weather_descr()
-            arr = OpenAiWrapper.__build_morning_instr(weather, events)
-            return self._send_chat(arr)
-        except Exception as e:
-            logger.error(e)
-        self.busy = False
-        return ""
+        weather = SMHI.get_weather_descr()
+        arr = OpenAiWrapper.__build_morning_instr(weather, events)
+        return self._send_chat(arr)
 
     def upcomingEvents(self, events: list[CEvent]) -> str:
         """Calls OpenAI with weather and calender events as input. Slightly
@@ -75,23 +66,13 @@ class OpenAiWrapper:
         returns:
             object: Response object from OpenAI. Contains both text and audio data.
         """
-        if self.busy:
-            return
-        self.busy = True
-        try:
-            weather = SMHI.get_weather_descr()
-            arr = OpenAiWrapper.__build_events_instr(weather, events)
-            return self._send_chat(arr)
-        except Exception as e:
-            logger.error(e)
-        self.busy = False
-        return ""
+        weather = SMHI.get_weather_descr()
+        arr = OpenAiWrapper.__build_events_instr(weather, events)
+        return self._send_chat(arr)
 
     def _send_audio_chat(self, audio: str) -> str:
-        """"""
-        if self.busy:
-            return
-        self.busy = True
+        """Sends a recorded question (base64 wav) and stores the spoken
+        answer in self.audio. Blocking."""
         self.audio = None
         completion = self.client.chat.completions.create(
             model=OPENAI_AUDIO_MODEL,
@@ -100,7 +81,6 @@ class OpenAiWrapper:
             messages=OpenAiWrapper.build_audio_instr(audio),
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
-        self.busy = False
         return completion.choices[0].message
 
     def _send_chat(self, convo_arr) -> str:
@@ -113,7 +93,7 @@ class OpenAiWrapper:
             messages=convo_arr,
         )
         self.audio = base64.b64decode(completion.choices[0].message.audio.data)
-        logger.debug("New audio data received: %s", self.audio)
+        logger.debug("Received %d bytes of audio", len(self.audio))
         return completion.choices[0].message
         # print(completion.choices[0].message)
 

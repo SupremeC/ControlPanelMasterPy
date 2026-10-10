@@ -1,0 +1,325 @@
+#!/usr/bin/env python
+"""Tests for ControlPanel's event loop, timers, background jobs and the
+button flows that use them.
+
+The constructor opens nothing, so a real ControlPanel is built and its
+audio, WLED, OpenAI and calendar parts are replaced with mocks. Only the
+two job lanes are started. Never call ControlPanel.start() here.
+"""
+
+from concurrent.futures import Future
+from queue import Empty
+import threading
+import time
+import unittest
+import unittest.mock as mock
+
+from daemon.audio_ctrl import SysAudioEvent as aevent
+from daemon.controlpanel_class import BRIEFING_DELAY, ControlPanel, EFFECT_BUTTONS
+from daemon.events import CalendarAlarm, PlaybackChanged
+from daemon.packet import HWEvent, Packet
+
+
+class EventLoopTestCase(unittest.TestCase):
+    def setUp(self):
+        cp = ControlPanel()
+        cp._audioctrl = mock.Mock()
+        cp._audioctrl.current_filepath = "/tmp/rec.wav"
+        cp.wled_instance = mock.Mock()
+        cp.ai = mock.Mock()
+        cp.cal = mock.Mock()
+        cp._audio_jobs.start()
+        cp._ai_jobs.start()
+        self.addCleanup(cp._audio_jobs.stop)
+        self.addCleanup(cp._ai_jobs.stop)
+        self.cp = cp
+
+    def process_until(self, predicate, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.cp.process(max_wait=0.02)
+            if predicate():
+                return True
+        return predicate()
+
+    def sent_packets(self) -> list:
+        packets = []
+        while True:
+            try:
+                packets.append(self.cp._packet_sendqueue.get_nowait())
+            except Empty:
+                return packets
+
+    def panel_on(self):
+        self.cp._ctrls.get_ctrl_by_name("masterSw").state = True
+        self.cp._ctrls.get_ctrl_by_name("InputsSw").state = True
+
+
+class TestDispatch(EventLoopTestCase):
+    def test_packet_isHandled(self):
+        # act
+        self.cp._events.put(Packet(HWEvent.HELLO, 1, 1))
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assertIsNotNone(self.cp._last_received_hello)
+
+    def test_playbackChanged_blinksSpeakerLeds(self):
+        # act
+        self.cp._events.put(PlaybackChanged(True))
+        self.cp.process(max_wait=0)
+
+        # assert
+        blinks = [p for p in self.sent_packets() if p.hw_event == HWEvent.BLINKFOREVER]
+        self.assertEqual(1, len(blinks))
+        self.assertEqual(1, blinks[0].val)
+
+    def test_handlerError_isLoggedNotRaised(self):
+        # arrange
+        def broken(_result):
+            raise RuntimeError("handler bug")
+
+        self.cp._run_job(self.cp._audio_jobs, "x", lambda: 1, on_done=broken)
+
+        # act / assert
+        with self.assertLogs("daemon.ctrlPanel", "ERROR") as logs:
+            self.process_until(lambda: False, timeout=0.3)
+        self.assertTrue(
+            any(
+                r.exc_info and isinstance(r.exc_info[1], RuntimeError)
+                for r in logs.records
+            )
+        )
+
+
+class TestTimers(EventLoopTestCase):
+    def test_callLater_runsOnlyWhenDue(self):
+        # arrange
+        calls = []
+        self.cp.call_later(0.2, calls.append, "done")
+
+        # act
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assertEqual([], calls)
+        self.assertTrue(self.process_until(lambda: calls == ["done"]))
+
+    def test_callLater_shortensEventWait(self):
+        # arrange
+        calls = []
+        self.cp.call_later(0.05, calls.append, "done")
+
+        # act
+        started = time.monotonic()
+        self.cp.process(max_wait=1.0)
+
+        # assert
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(["done"], calls)
+
+
+class TestJobs(EventLoopTestCase):
+    def test_onDone_runsOnMainThreadWithResult(self):
+        # arrange
+        seen = []
+        self.cp._run_job(
+            self.cp._audio_jobs,
+            "x",
+            lambda: 42,
+            on_done=lambda r: seen.append((r, threading.current_thread())),
+        )
+
+        # act / assert
+        self.assertTrue(self.process_until(lambda: seen))
+        self.assertEqual((42, threading.current_thread()), seen[0])
+
+    def test_failureWithoutOnError_playsFailed(self):
+        # arrange
+        def boom():
+            raise RuntimeError("job failed")
+
+        # act
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.cp._run_job(self.cp._audio_jobs, "x", boom)
+            self.assertTrue(
+                self.process_until(lambda: self.cp._audioctrl.sysaudio_play.called)
+            )
+
+        # assert
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.FAILED)
+
+
+class TestAlarmFlow(EventLoopTestCase):
+    def test_alarm_thenButton_briefingIsScheduledNotRun(self):
+        # arrange
+        self.cp._events.put(CalendarAlarm())
+        self.cp.process(max_wait=0)
+        self.assertTrue(self.cp.alarm_on)
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.ALARM, False, 20)
+
+        # act
+        started = time.monotonic()
+        self.cp._events.put(Packet(HWEvent.SWITCH, 2, 1))
+        self.cp.process(max_wait=0)
+
+        # assert: handled at once, briefing waits on a timer
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertFalse(self.cp.alarm_on)
+        self.cp._audioctrl.stop_alarm.assert_called_once()
+        self.cp.ai.morningBreifing.assert_not_called()
+        due, _, fn, _ = self.cp._timers[0]
+        self.assertEqual(self.cp._start_morning_briefing, fn)
+        self.assertAlmostEqual(time.monotonic() + BRIEFING_DELAY, due, delta=0.5)
+
+    def test_morningBriefing_runsOnAiLane(self):
+        # act
+        self.cp._start_morning_briefing()
+
+        # assert
+        self.assertTrue(self.process_until(lambda: self.cp._ai_job.done()))
+        self.cp.ai.morningBreifing.assert_called_once_with(
+            self.cp.cal.get_todays_events.return_value
+        )
+        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+
+
+class TestAiButton(EventLoopTestCase):
+    def test_success_blinksUntilAnswerPlayed(self):
+        # arrange
+        btn = mock.MagicMock()
+
+        # act
+        self.cp.ai_talk(btn, audio_call=False)
+
+        # assert
+        btn.leds[0].blink.assert_called_once_with(forever=True)
+        self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
+        self.cp.ai.upcomingEvents.assert_called_once()
+        self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+
+    def test_failure_playsFailedAndStopsBlink(self):
+        # arrange
+        btn = mock.MagicMock()
+        self.cp.cal.get_todays_events.side_effect = RuntimeError("no network")
+
+        # act
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.cp.ai_talk(btn, audio_call=False)
+            self.assertTrue(self.process_until(lambda: btn.leds[0].blink_stop.called))
+
+        # assert
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.FAILED)
+
+    def test_whileBusy_isIgnored(self):
+        # arrange
+        btn = mock.MagicMock()
+        self.cp._ai_job = Future()  # still running
+
+        # act
+        self.cp.ai_talk(btn, audio_call=False)
+
+        # assert
+        btn.leds[0].blink.assert_not_called()
+
+
+class TestEffectButton(EventLoopTestCase):
+    def test_effect_rendersOnAudioLaneThenPlays(self):
+        # arrange
+        self.cp._audioctrl.render_effect.return_value = "/tmp/out.wav"
+
+        # act
+        self.cp.apply_soundeffect(Packet(HWEvent.SWITCH, 18, 1))
+
+        # assert
+        self.assertTrue(
+            self.process_until(lambda: self.cp._audioctrl.effect_done.called)
+        )
+        self.cp._audioctrl.render_effect.assert_called_once_with(
+            "/tmp/rec.wav", EFFECT_BUTTONS[18]
+        )
+        self.cp._audioctrl.effect_done.assert_called_once_with("/tmp/out.wav")
+
+    def test_whileBusy_isIgnored(self):
+        # arrange
+        self.cp._effect_job = Future()  # still running
+
+        # act
+        self.cp.apply_soundeffect(Packet(HWEvent.SWITCH, 18, 1))
+        self.process_until(lambda: False, timeout=0.2)
+
+        # assert
+        self.cp._audioctrl.render_effect.assert_not_called()
+
+
+class TestRecordButton(EventLoopTestCase):
+    def test_pressRelease_startThenStopInOrder(self):
+        # arrange
+        self.panel_on()
+        order = []
+        self.cp._audioctrl.start_recording.side_effect = lambda: order.append("start") or True
+        self.cp._audioctrl.stop_recording.side_effect = lambda: order.append("stop") or "/tmp/new.wav"
+
+        # act
+        self.cp._events.put(Packet(HWEvent.SWITCH, 27, 1))
+        self.cp._events.put(Packet(HWEvent.SWITCH, 27, 0))
+
+        # assert
+        self.assertTrue(
+            self.process_until(lambda: self.cp._audioctrl.recording_stopped.called)
+        )
+        self.assertEqual(["start", "stop"], order)
+        self.cp._audioctrl.prepare_recording.assert_called_once()
+        self.cp._audioctrl.recording_stopped.assert_called_once_with("/tmp/new.wav")
+        self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.REC_STOPPED)
+
+    def test_startFails_playsCouldNotRec(self):
+        # arrange
+        self.panel_on()
+        self.cp._audioctrl.start_recording.return_value = False
+
+        # act
+        self.cp._events.put(Packet(HWEvent.SWITCH, 27, 1))
+
+        # assert
+        self.assertTrue(
+            self.process_until(lambda: self.cp._audioctrl.sysaudio_play.called)
+        )
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.REC_COULD_NOT_REC)
+
+
+class TestDemoAndBedLamp(EventLoopTestCase):
+    def test_demo_togglesLedsFromTheMainLoop(self):
+        # arrange
+        led = mock.Mock()
+        led.set_led_state.return_value = [Packet(HWEvent.LED, 1, 1)]
+        self.cp.demo_on = True
+        self.cp._demo_leds = [led]
+
+        # act
+        self.process_until(lambda: led.set_led_state.call_count >= 2, timeout=1)
+        self.cp.demo_on = False
+        calls = led.set_led_state.call_count
+        self.process_until(lambda: False, timeout=0.3)
+
+        # assert
+        self.assertGreaterEqual(calls, 2)
+        self.assertEqual(calls, led.set_led_state.call_count, "demo must stop")
+
+    def test_bedLamp_pulseEndsOnATimer(self):
+        # arrange
+        self.panel_on()
+        lamp = self.cp._ctrls.get_ctrl(38).slaves[0]
+
+        # act
+        self.cp._set_relays(Packet(HWEvent.SWITCH, 38, 0), is_safetyctrl=True)
+
+        # assert: on now, off after the pulse, without blocking the loop
+        self.assertTrue(lamp.state)
+        self.assertEqual(1, len(self.cp._timers))
+        self.assertTrue(self.process_until(lambda: not self.cp._timers, timeout=1))
+        self.assertFalse(lamp.state)
+
+
+if __name__ == "__main__":
+    unittest.main()

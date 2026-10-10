@@ -1,15 +1,19 @@
 """ControlPanel_Class"""
 
+from concurrent.futures import Future
 from contextlib import ExitStack
 import datetime
+import heapq
+import itertools
 import logging
 from queue import Empty, Full, Queue
 import random
-import threading
 import time
-from typing import List
+from typing import Any, Callable, List
 
 from .component import Component
+from .events import CalendarAlarm, JobDone, PlaybackChanged, SunriseDue
+from .workers import Workers
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
 from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
@@ -32,10 +36,30 @@ SEND_HELLO_INTERVALL = 120  # seconds
 # arrives this long after a (re)connect, ask the Mega for its status.
 # A rebooting Mega needs about 10 s before it sends BOOTMEGA.
 RESYNC_AFTER_CONNECT = 15  # seconds
+MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
+DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
+BRIEFING_DELAY = 5  # seconds between stopping the alarm and the briefing
+BED_LAMP_PULSE = 0.1  # seconds the bed lamp relay is pulsed
+EFFECT_BUTTONS = {
+    17: EffectType.BITCRUSH,
+    18: EffectType.PHASER,
+    19: EffectType.REVERSE,
+    22: EffectType.TIMESTRETCH,
+    23: EffectType.PITCHLOWER,
+    24: EffectType.PITCHHIGHER,
+    25: EffectType.TIMECOMPRESS,
+    26: EffectType.REVERB,
+}
 
 
 class ControlPanel:
-    """Master class (besides controlPanelDaemon of course)"""
+    """Master class (besides controlPanelDaemon of course)
+
+    Everything that changes panel state runs on the main thread, one event
+    at a time (see process()). Other threads only post events: the serial
+    reader posts Packets, the calendar posts CalendarAlarm/SunriseDue, the
+    audio monitor posts PlaybackChanged, and background jobs post JobDone.
+    """
 
     demo_on: bool = False
 
@@ -45,28 +69,44 @@ class ControlPanel:
         self._synced_connection: float | None = None
         self._ctrls: HwCtrls = HwCtrls()
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
-        self._packet_receivedqueue: Queue = Queue()
+        self._events: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(
-            self._packet_receivedqueue, self._packet_sendqueue
+            self._events, self._packet_sendqueue
         )
+        self._timers: list = []
+        self._timer_seq = itertools.count()
+        # One thread per lane, so jobs in a lane run in order.
+        self._audio_jobs = Workers("audio-job")
+        self._ai_jobs = Workers("ai-job")
+        self._effect_job: Future | None = None
+        self._ai_job: Future | None = None
+        self._demo_leds: list = []
+        self._next_demo_step = 0.0
         self._stopped: bool = False
         self._components_stack = ExitStack()
         self.demo_on: bool = False
         self.alarm_on: bool = False
         self.btnLeds: bool = True
-        self.cal = Calender(self.on_cal_alarm, self.on_cal_sunrise)
+        self.cal = Calender(
+            lambda: self._events.put(CalendarAlarm()),
+            lambda minutes: self._events.put(SunriseDue(minutes)),
+        )
         self.ai = OpenAiWrapper()
-        self._audioctrl: AudioCtrl = AudioCtrl(self.speakerLeds)
+        self._audioctrl: AudioCtrl = AudioCtrl(
+            lambda playing: self._events.put(PlaybackChanged(playing))
+        )
         self.wled_instance = WLED()
 
     def _components(self) -> list[tuple[str, Component]]:
-        """Components in start order. The calendar comes last because
-        its callbacks use audio and WLED."""
+        """Components in start order. The job lanes come last so they
+        stop first, before the audio and WLED their jobs use."""
         return [
             ("serial", self._pserial),
             ("wled", self.wled_instance),
             ("audio", self._audioctrl),
             ("calendar", self.cal),
+            ("audio jobs", self._audio_jobs),
+            ("ai jobs", self._ai_jobs),
         ]
 
     def start(self):
@@ -98,16 +138,101 @@ class ControlPanel:
         except Exception:
             logger.exception("Stopping %s failed", name)
 
-    def process(self) -> None:
-        """Call this method regularly to process packets"""
+    def process(self, max_wait: float = MAX_EVENT_WAIT) -> None:
+        """Handles the next event, then due timers and housekeeping.
+        Waits at most max_wait seconds for an event (less if a timer is
+        due sooner). Call it in a loop on the main thread."""
         try:
-            self._process_packets()
-            self._resync_if_needed()
-            if self.time_to_send_hello():
-                self._pserial.send_hello()
-                self._last_sent_hello = datetime.datetime.now()
-        except Exception as e:
-            logger.exception(e)
+            event = self._events.get(timeout=self._wait_time(max_wait))
+        except Empty:
+            pass
+        else:
+            self._dispatch(event)
+        self._run_due_timers()
+        try:
+            self._tick()
+        except Exception:
+            logger.exception("Housekeeping failed")
+
+    def _dispatch(self, event: Any) -> None:
+        """Handles one event. The only place handler errors are caught."""
+        try:
+            if isinstance(event, Packet):
+                self.__act(event)
+            elif isinstance(event, JobDone):
+                self._job_done(event)
+            elif isinstance(event, PlaybackChanged):
+                self.speakerLeds(event.playing)
+            elif isinstance(event, CalendarAlarm):
+                self.on_cal_alarm()
+            elif isinstance(event, SunriseDue):
+                self.on_cal_sunrise(event.minutes)
+            else:
+                logger.warning("Unknown event %r", event)
+        except Exception:
+            logger.exception("Handling %r failed", event)
+
+    def _tick(self) -> None:
+        self._resync_if_needed()
+        self._demo_step()
+        if self.time_to_send_hello():
+            self._pserial.send_hello()
+            self._last_sent_hello = datetime.datetime.now()
+
+    def call_later(self, delay: float, fn: Callable[..., None], *args: Any) -> None:
+        """Runs fn(*args) on the main thread after delay seconds."""
+        due = time.monotonic() + delay
+        heapq.heappush(self._timers, (due, next(self._timer_seq), fn, args))
+
+    def _wait_time(self, max_wait: float) -> float:
+        if not self._timers:
+            return max_wait
+        return max(0.0, min(max_wait, self._timers[0][0] - time.monotonic()))
+
+    def _run_due_timers(self) -> None:
+        now = time.monotonic()
+        while self._timers and self._timers[0][0] <= now:
+            _, _, fn, args = heapq.heappop(self._timers)
+            try:
+                fn(*args)
+            except Exception:
+                logger.exception("Timer %s failed", fn)
+
+    def _run_job(
+        self,
+        lane: Workers,
+        name: str,
+        fn: Callable[..., Any],
+        *args: Any,
+        on_done: Callable[[Any], None] | None = None,
+        on_error: Callable[[BaseException], None] | None = None,
+    ) -> Future:
+        """Runs fn(*args) on a job lane. When it finishes, on_done(result)
+        or on_error(exception) runs on the main thread. Without on_error a
+        failure plays the FAILED sound."""
+        future = lane.submit(fn, *args)
+        future.add_done_callback(
+            lambda f: self._events.put(JobDone(name, f, on_done, on_error))
+        )
+        return future
+
+    def _job_done(self, event: JobDone) -> None:
+        if event.future.cancelled():
+            return
+        error = event.future.exception()
+        if error is not None:
+            logger.error("Job %s failed", event.name, exc_info=error)
+            if event.on_error is not None:
+                event.on_error(error)
+            else:
+                self._audioctrl.sysaudio_play(aevent.FAILED)
+            return
+        if event.on_done is not None:
+            event.on_done(event.future.result())
+
+    @staticmethod
+    def _is_running(job: Future | None) -> bool:
+        return job is not None and not job.done()
 
     def _resync_if_needed(self) -> None:
         """Requests the Mega's status once per connection if no BOOTMEGA
@@ -121,38 +246,25 @@ class ControlPanel:
         logger.info("No BOOTMEGA since the Mega connected. Requesting status")
         self.reset()
 
-    def _process_packets(self) -> None:
-        try:
-            while self._packet_receivedqueue.qsize() > 0:
-                self.__act(self._packet_receivedqueue.get(block=True, timeout=2))
-                self._packet_receivedqueue.task_done()
-        except Empty:
-            pass
-
     def __act(self, packet: Packet) -> None:
-        try:
-            if packet.hw_event == HWEvent.BOOTMEGA:
-                logger.info("Received BOOTMEGA packet. Mega was (re)booted")
-                self._synced_connection = self._pserial.connected_at
-                self.reset()
-            elif packet.hw_event == HWEvent.HELLO:
-                self._last_received_hello = datetime.datetime.now()
-            elif packet.hw_event == HWEvent.RESET:
-                logger.info("Received RESET packet. starting reset routine")
-                self.reset()
-            elif packet.hw_event == HWEvent.STATUS:
-                # Status packet. Target == Switch pin.
-                logger.debug("Status: pin %d = %d", packet.target, packet.val)
-                self._switch_status_changed(packet, no_action=True)
-            elif packet.hw_event == HWEvent.SWITCH:
-                # A switch has changed status. React
-                self._switch_status_changed(packet)
-            elif packet.hw_event == HWEvent.UNDEFINED:
-                logger.warning("Received undefined package: %s", packet)
-        except Full as err_full:
-            logger.error(err_full)
-        except Exception as error:
-            logger.error(error)
+        if packet.hw_event == HWEvent.BOOTMEGA:
+            logger.info("Received BOOTMEGA packet. Mega was (re)booted")
+            self._synced_connection = self._pserial.connected_at
+            self.reset()
+        elif packet.hw_event == HWEvent.HELLO:
+            self._last_received_hello = datetime.datetime.now()
+        elif packet.hw_event == HWEvent.RESET:
+            logger.info("Received RESET packet. starting reset routine")
+            self.reset()
+        elif packet.hw_event == HWEvent.STATUS:
+            # Status packet. Target == Switch pin.
+            logger.debug("Status: pin %d = %d", packet.target, packet.val)
+            self._switch_status_changed(packet, no_action=True)
+        elif packet.hw_event == HWEvent.SWITCH:
+            # A switch has changed status. React
+            self._switch_status_changed(packet)
+        elif packet.hw_event == HWEvent.UNDEFINED:
+            logger.warning("Received undefined package: %s", packet)
 
     def _switch_status_changed(self, packet: Packet, no_action: bool = False) -> Packet:
         """Handles button logic"""
@@ -189,9 +301,7 @@ class ControlPanel:
             if self.alarm_on and packet.target not in range(54, 63):  # analog ctrls
                 self.alarm_on = False
                 self._audioctrl.stop_alarm()
-                time.sleep(5)
-                self.ai.morningBreifing(self.cal.get_todays_events())
-                self._audioctrl.play_bytes(self.ai.audio)
+                self.call_later(BRIEFING_DELAY, self._start_morning_briefing)
                 return
 
             if not mastersw.state or not inputsw.state:
@@ -218,10 +328,7 @@ class ControlPanel:
                     self.demo_on = not self.demo_on
                     if self.demo_on:
                         self._audioctrl.sysaudio_play(aevent.DEMOMODE)
-                        demo_thread = threading.Thread(
-                            target=self.wrapped_demo_run, name="demo", daemon=True
-                        )
-                        demo_thread.start()
+                        self._demo_leds = self._ctrls._get_all_leds()
                 else:
                     self._audioctrl.restore_original_audio(packet.target)
                 return
@@ -235,21 +342,21 @@ class ControlPanel:
                     )
                 return
             if packet.target == 27 and packet.val:
-                self._audioctrl.sysaudio_play(aevent.REC_STARTED, True)
-                self._audioctrl.start_recording()
+                self._audioctrl.prepare_recording()
+                self._run_job(
+                    self._audio_jobs,
+                    "rec-start",
+                    self._audioctrl.start_recording,
+                    on_done=self._recording_started,
+                )
                 return
             if packet.target == 27 and packet.val == 0:
-                self._audioctrl.stop_recording()
-                self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
-                ai_ctrl = self._ctrls.get_slavectrl(69)
-                self.send_packets(ai_ctrl.leds[0].blink(True))
-                self.send_packets(
-                    Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.EFFECT_BTNS, 2)
+                self._run_job(
+                    self._audio_jobs,
+                    "rec-stop",
+                    self._audioctrl.stop_recording,
+                    on_done=self._recording_stopped,
                 )
-                self.send_packets(
-                    Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.AUDIO_PRESETBTNS, 2)
-                )
-                self._audioctrl._play_tmp_rec()
                 return
             if packet.target >= 66 and packet.target <= 69:
                 self._set_relays(packet, is_safetyctrl=False)
@@ -279,31 +386,44 @@ class ControlPanel:
 
     def apply_soundeffect(self, packet: Packet):
         btn = self._ctrls.get_ctrl(packet.target)
-        match packet.target:
-            case 17:
-                self._audioctrl.apply_effect(EffectType.BITCRUSH, None)
-            case 18:
-                self._audioctrl.apply_effect(EffectType.PHASER, None)
-            case 19:
-                self._audioctrl.apply_effect(EffectType.REVERSE, None)
-            case 22:
-                self._audioctrl.apply_effect(EffectType.TIMESTRETCH, None)
-            case 23:
-                self._audioctrl.apply_effect(EffectType.PITCHLOWER, None)
-            case 24:
-                self._audioctrl.apply_effect(EffectType.PITCHHIGHER, None)
-            case 25:
-                self._audioctrl.apply_effect(EffectType.TIMECOMPRESS, None)
-            case 26:
-                self._audioctrl.apply_effect(EffectType.REVERB, None)
+        if self._is_running(self._effect_job):
+            logger.warning("An effect is already being applied. NOOP")
+        else:
+            self._effect_job = self._run_job(
+                self._audio_jobs,
+                "effect",
+                self._audioctrl.render_effect,
+                self._audioctrl.current_filepath,
+                EFFECT_BUTTONS[packet.target],
+                on_done=self._audioctrl.effect_done,
+            )
         self.send_packets(btn.leds[0].blink())
 
-    def wrapped_demo_run(self) -> None:
-        self._led_ctrls = self._ctrls._get_all_leds()
-        while self.demo_on:
-            rnd_item = random.choice(self._led_ctrls)
-            self.send_packets(rnd_item.set_led_state(not rnd_item.state))
-            time.sleep(0.1)
+    def _recording_started(self, started: bool) -> None:
+        if not started:
+            self._audioctrl.sysaudio_play(aevent.REC_COULD_NOT_REC)
+
+    def _recording_stopped(self, filename: str | None) -> None:
+        self._audioctrl.recording_stopped(filename)
+        self._audioctrl.sysaudio_play(aevent.REC_STOPPED)
+        ai_ctrl = self._ctrls.get_slavectrl(69)
+        self.send_packets(ai_ctrl.leds[0].blink(True))
+        self.send_packets(Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.EFFECT_BTNS, 2))
+        self.send_packets(
+            Packet(HWEvent.BLINK3ENDHIGH, BlinkTarget.AUDIO_PRESETBTNS, 2)
+        )
+        self._audioctrl._play_tmp_rec()
+
+    def _demo_step(self) -> None:
+        """Toggles a random LED every DEMO_STEP_INTERVAL while demo mode is on."""
+        if not self.demo_on or not self._demo_leds:
+            return
+        now = time.monotonic()
+        if now < self._next_demo_step:
+            return
+        self._next_demo_step = now + DEMO_STEP_INTERVAL
+        rnd_item = random.choice(self._demo_leds)
+        self.send_packets(rnd_item.set_led_state(not rnd_item.state))
 
     def cp_bg_lights(self, packet: Packet) -> None:
         """background light ON/OFF"""
@@ -343,9 +463,12 @@ class ControlPanel:
                     pass
                 else:
                     if packet.target == 38:  # Bed lamp
-                        self.send_packets(flipsw.slaves[0].set_state(True))
-                        time.sleep(0.1)
-                        self.send_packets(flipsw.slaves[0].set_state(False))
+                        lamp = flipsw.slaves[0]
+                        self.send_packets(lamp.set_state(True))
+                        self.call_later(
+                            BED_LAMP_PULSE,
+                            lambda: self.send_packets(lamp.set_state(False)),
+                        )
                     else:
                         # turn off slave relay
                         self.send_packets(flipsw.slaves[0].set_state(False))
@@ -370,38 +493,51 @@ class ControlPanel:
             logger.exception("Ctrl not found")
             raise
 
-    def ai_talk(self, p_btn, p_audio_call: bool) -> None:
-        self.ai_thread = threading.Thread(
-            target=self.wrapped_ai_talk,
-            kwargs=dict(btn=p_btn, audio_call=p_audio_call),
-            name="ai",
-            daemon=True,
-        )
-        self.ai_thread.start()
+    def ai_talk(self, btn, audio_call: bool) -> None:
+        """AI button: asks the recorded question (audio_call) or tells
+        today's events. The button blinks until the answer has played."""
+        if self._is_running(self._ai_job):
+            logger.warning("AI is still busy. Ignoring the AI button")
+            return
+        self.send_packets(btn.leds[0].blink(forever=True))
+        if audio_call:
+            job = (self._ask_ai, self._audioctrl.current_filepath)
+        else:
+            job = (self._tell_upcoming_events,)
 
-    def wrapped_ai_talk(self, btn, audio_call: bool) -> None:
-        try:
-            if audio_call:
-                self.send_packets(btn.leds[0].blink(forever=True))
-                audio_str = self._audioctrl._read_wav_file(
-                    self._audioctrl.current_filepath
-                )
-                self.ai._send_audio_chat(audio_str)
-                self._audioctrl.play_bytes(self.ai.audio)
-                self.send_packets(btn.leds[0].blink_stop())
-                self.ai.busy = False
-            else:
-                # Load events from google calender and create morning breifing text with openAI, then play it.
-                self.send_packets(btn.leds[0].blink(forever=True))
-                self.ai.upcomingEvents(self.cal.get_todays_events())
-                self._audioctrl.play_bytes(self.ai.audio)
-                self.send_packets(btn.leds[0].blink_stop())
-                self.ai.busy = False
-        except Exception as e:
-            self.ai.busy = False
+        def failed(_error: BaseException) -> None:
             self._audioctrl.sysaudio_play(aevent.FAILED)
             self.send_packets(btn.leds[0].blink_stop())
-            logger.error(e)
+
+        self._ai_job = self._run_job(
+            self._ai_jobs,
+            "ai",
+            *job,
+            on_done=lambda _result: self.send_packets(btn.leds[0].blink_stop()),
+            on_error=failed,
+        )
+
+    def _start_morning_briefing(self) -> None:
+        if self._is_running(self._ai_job):
+            logger.warning("AI is still busy. Skipping the morning briefing")
+            return
+        self._ai_job = self._run_job(
+            self._ai_jobs, "morning-briefing", self._morning_briefing
+        )
+
+    # The three jobs below run on the AI lane, not on the main thread.
+
+    def _ask_ai(self, wav_path) -> None:
+        self.ai._send_audio_chat(AudioCtrl._read_wav_file(wav_path))
+        self._audioctrl.play_bytes(self.ai.audio)
+
+    def _tell_upcoming_events(self) -> None:
+        self.ai.upcomingEvents(self.cal.get_todays_events())
+        self._audioctrl.play_bytes(self.ai.audio)
+
+    def _morning_briefing(self) -> None:
+        self.ai.morningBreifing(self.cal.get_todays_events())
+        self._audioctrl.play_bytes(self.ai.audio)
 
     def speakerLeds(self, on: bool) -> None:
         if on:
@@ -412,7 +548,6 @@ class ControlPanel:
     def on_cal_alarm(self) -> None:
         self.alarm_on = True
         self._audioctrl.sysaudio_play(aevent.ALARM, False, 20)
-        pass
 
     def on_cal_sunrise(self, duration: int) -> None:
         self.wled_instance.do_sunrise(duration * 60)

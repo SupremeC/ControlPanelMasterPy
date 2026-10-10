@@ -30,8 +30,6 @@ from daemon.controlpanel_class import ControlPanel  # noqa: E402
 
 logger = logging.getLogger("daemon")
 
-LOOP_INTERVAL = 0.1  # seconds
-
 
 def main() -> int:
     """Runs the control panel until SIGTERM/SIGINT. Returns the exit code."""
@@ -52,8 +50,7 @@ def main() -> int:
         control_panel.start()
         logger.debug("Daemon init complete")
         while not stop_event.is_set():
-            control_panel.process()
-            stop_event.wait(LOOP_INTERVAL)
+            control_panel.process()  # waits up to 0.1 s for an event
     except Exception:
         logger.exception("Daemon crashed")
         return 1

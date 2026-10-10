@@ -65,7 +65,6 @@ class AudioCtrl:
     """
 
     systemsounds: dict = None
-    effects_running: bool = False
     _current_filepath: str
     max_rectime_seconds: int = 30
     rec_channel: mixer.Channel
@@ -231,63 +230,60 @@ class AudioCtrl:
         """Stops all audio playback."""
         mixer.stop()
 
+    def prepare_recording(self) -> None:
+        """Forgets the previous recording and stops its playback.
+        Call on the main thread before start_recording()."""
+        self.current_filepath = None
+        self.rec_time = None
+        self.rec_channel.stop()  # Stop playing audio
+
     def start_recording(self) -> bool:
-        """Returns immediately. Recording is done in a new thread.
-        Records until StopRecording is called or
-        30(DEFAULT) seconds has passed.
+        """Blocking: plays the REC_STARTED cue to the end (so it is not
+        recorded), then starts recording in AudioRec's own thread. Records
+        until stop_recording() is called or 30(DEFAULT) seconds have passed.
+        Run it on a worker.
 
         :Return: bool: True if recording started, False otherwise
         """
         logger.debug("starting recording")
-        self.current_filepath = None
-        self.rec_time = None
-        self.rec_channel.stop()  # Stop playing audio
+        self.sysaudio_play(SysAudioEvent.REC_STARTED, block=True)
         AudioCtrl.__remove_files_in_dir(self.__tempdir)
-        if not self.rec_ctrl.rec():
-            self.sysaudio_play(SysAudioEvent.REC_COULD_NOT_REC)
-            return False
-        return True
+        return self.rec_ctrl.rec()
 
     def is_recording(self) -> bool:
         """Are we currently recording?"""
         return self.rec_ctrl.recording
 
-    def stop_recording(self) -> None:
-        """Signals 'Stop' and blocks until recording has stopped.
-        The resulting .wave-file can be found at <AudioCtrl.current_filepath>"""
+    def stop_recording(self) -> str | None:
+        """Blocking (up to 2 s): stops the recording. Run it on a worker.
+        Returns the recorded file, or None if nothing was recording."""
         if not self.is_recording():
-            return
+            return None
         logger.debug("stopping recording...")
         self.rec_ctrl.stop()
-        self.current_filepath = self.rec_ctrl.rec_filename
-        self.rec_time = datetime.datetime.now()
         logger.debug("recording stopped")
+        return self.rec_ctrl.rec_filename
 
-    def apply_effect(
-        self, p_effect: EffectType, p_callback: Callable[[str], None] = None
-    ) -> bool:
-        """Apply effect to current audio file.
-        Returns immediately. Effect processing is done in a new thread.
-        :Return: bool: True if effectProcessing started, False otherwise
-        """
-        if self.effects_running:
-            logger.warning("An effect is already being applied. NOOP")
-            return False
-        if self.current_filepath is None:
-            logger.error("Could not apply effect to audio because sound not defined")
-            self.sysaudio_play(SysAudioEvent.FAILED)
-            return False
-        effectthread = threading.Thread(
-            target=self.__wrapped_apply_effect,
-            kwargs=dict(
-                infile=self.current_filepath, effect=p_effect, callback=p_callback
-            ),
-            name="audio-effect",
-            daemon=True,
-        )
-        effectthread.start()
-        self.effects_running = True
-        return self.effects_running
+    def recording_stopped(self, filename: str | None) -> None:
+        """Makes the stopped recording current. Call on the main thread
+        with the result of stop_recording()."""
+        if filename is None:
+            return
+        self.current_filepath = filename
+        self.rec_time = datetime.datetime.now()
+
+    def render_effect(self, infile: str, effect: EffectType) -> str:
+        """Blocking: writes infile with the effect applied to a new temp
+        file and returns its path. Run it on a worker."""
+        outfile = self.__build_tmp_filename(suffix="effect.tmp.wav")
+        outfile = str(self.__tempdir.joinpath(outfile).resolve())
+        return self.effect_ctrl.do_effect(str(infile), effect, outfile)
+
+    def effect_done(self, path: str | None) -> None:
+        """Makes the rendered effect current and plays it. Call on the
+        main thread with the result of render_effect()."""
+        self.current_filepath = path
+        self._play_tmp_rec()
 
     def save_rec_to_hwswitch(self, switch: int) -> str:
         """Moves audio file to storage.
@@ -328,24 +324,6 @@ class AudioCtrl:
             encoded_data = base64.b64encode(file_bytes).decode("utf-8")
             return encoded_data
 
-    def __wrapped_apply_effect(
-        self, infile, effect, callback: Callable[[str], None] = None
-    ) -> None:
-        if self.current_filepath is None:
-            self.sysaudio_play(SysAudioEvent.FAILED)
-            return
-        self.effects_running = True
-        outfile = self.__build_tmp_filename(suffix="effect.tmp.wav")
-        outfile = str(self.__tempdir.joinpath(outfile).resolve())
-        self.current_filepath = self.effect_ctrl.do_effect(str(infile), effect, outfile)
-        self.__effect_on_done()
-        if callback is not None:
-            callback(self.current_filepath)
-
-    def __effect_on_done(self) -> None:
-        self.rec_time = datetime.datetime.now()
-        self._play_tmp_rec()
-
     def _play_tmp_rec(self) -> None:
         if self.current_filepath is None:
             self.sysaudio_play(SysAudioEvent.FAILED)
@@ -356,11 +334,10 @@ class AudioCtrl:
         self.rec_channel.stop()
         try:
             sound = mixer.Sound(self.current_filepath)
-            self.effects_running = False
             sound.set_volume(self.get_volume())
             self.rec_channel.play(sound, loops=0)
-        except Exception as x:
-            logger.error(x)
+        except Exception:
+            logger.exception("Playing the recording failed")
             self.sysaudio_play(SysAudioEvent.FAILED)
             self.current_filepath = None
             self.rec_ctrl.recording = False

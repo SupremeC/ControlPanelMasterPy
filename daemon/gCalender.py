@@ -96,8 +96,8 @@ class Calender:
                     if current_time > self.alarm.start:
                         self.alarm = None
                         self.on_alarm()
-            except Exception as e:
-                logger.error(e)
+            except Exception:
+                logger.exception("Calendar update failed")
             self._stop_event.wait(self.UPDATE_INTERVAL)
 
     def get_todays_events(self) -> List[CEvent]:
