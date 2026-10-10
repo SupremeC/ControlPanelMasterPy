@@ -8,6 +8,7 @@ two job lanes are started. Never call ControlPanel.start() here.
 """
 
 from concurrent.futures import Future
+import datetime
 from queue import Empty
 import threading
 import time
@@ -15,8 +16,10 @@ import unittest
 import unittest.mock as mock
 
 from daemon.audio_ctrl import SysAudioEvent as aevent
-from daemon.controlpanel_class import BRIEFING_DELAY, ControlPanel, EFFECT_BUTTONS
-from daemon.events import CalendarAlarm, PlaybackChanged
+from daemon.controlpanel_class import ControlPanel, EFFECT_BUTTONS
+from daemon.events import CalendarAlarm, MorningTest, PlaybackChanged
+from daemon.gCalender import TIMEZONE
+from daemon.morning import State
 from daemon.packet import HWEvent, Packet
 
 
@@ -149,38 +152,166 @@ class TestJobs(EventLoopTestCase):
         self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.FAILED)
 
 
-class TestAlarmFlow(EventLoopTestCase):
-    def test_alarm_thenButton_briefingIsScheduledNotRun(self):
-        # arrange
-        self.cp._events.put(CalendarAlarm())
+def minutes_from_now(minutes: float) -> datetime.datetime:
+    return datetime.datetime.now(TIMEZONE) + datetime.timedelta(minutes=minutes)
+
+
+class TestMorningWiring(EventLoopTestCase):
+    """The routine itself is tested in test_morning.py; these check that
+    the panel feeds it and does what it asks."""
+
+    def ring(self):
+        # An alarm one minute overdue rings at once.
+        self.cp._events.put(CalendarAlarm(minutes_from_now(-1)))
         self.cp.process(max_wait=0)
-        self.assertTrue(self.cp.alarm_on)
-        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.ALARM, False, 20)
+        self.assertEqual(State.RINGING, self.cp.morning.state)
 
-        # act
-        started = time.monotonic()
-        self.cp._events.put(Packet(HWEvent.SWITCH, 2, 1))
+    def press(self, pin: int, val: int = 1):
+        self.cp._events.put(Packet(HWEvent.SWITCH, pin, val))
         self.cp.process(max_wait=0)
 
-        # assert: handled at once, briefing waits on a timer
-        self.assertLess(time.monotonic() - started, 0.5)
-        self.assertFalse(self.cp.alarm_on)
-        self.cp._audioctrl.stop_alarm.assert_called_once()
-        self.cp.ai.morningBreifing.assert_not_called()
-        due, _, fn, _ = self.cp._timers[0]
-        self.assertEqual(self.cp._start_morning_briefing, fn)
-        self.assertAlmostEqual(time.monotonic() + BRIEFING_DELAY, due, delta=0.5)
-
-    def test_morningBriefing_runsOnAiLane(self):
+    def test_calendarAlarm_armsTheRoutine(self):
         # act
-        self.cp._start_morning_briefing()
+        self.cp._events.put(CalendarAlarm(minutes_from_now(120)))
+        self.cp.process(max_wait=0)
 
         # assert
-        self.assertTrue(self.process_until(lambda: self.cp._ai_job.done()))
-        self.cp.ai.morningBreifing.assert_called_once_with(
-            self.cp.cal.todays_events.return_value
-        )
+        self.assertEqual(State.ARMED, self.cp.morning.state)
+
+    def test_ringing_alarmOverridesVolume_lightsAtEndState(self):
+        # act
+        self.ring()
+
+        # assert
+        audio = self.cp._audioctrl
+        audio.volume_override.assert_called_once_with(True, 70)
+        audio.alarm_start.assert_called_once_with(10)
+        brightness, rgbw = self.cp.wled_instance.set_both.call_args.args
+        self.assertEqual((255, (255, 140, 40, 255)), (brightness, rgbw))
+
+    def test_masterSwitchOff_alarmStillRingsAndIsDismissed(self):
+        # arrange
+        self.assertFalse(self.cp._ctrls.get_ctrl_by_name("masterSw").state)
+        self.ring()
+
+        # act
+        self.press(2)
+
+        # assert: dismissed, the button's own sound is not played
+        self.assertEqual(State.AWAKE, self.cp.morning.state)
+        self.cp._audioctrl.alarm_stop.assert_called_once_with()
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.CHIME_OFF)
+        self.cp._audioctrl.recsaved_play.assert_not_called()
+
+    def test_dismissWithMasterSwitch_keepsItsStateQuietly(self):
+        # arrange
+        self.ring()
+
+        # act
+        self.press(12, 1)
+
+        # assert
+        self.assertTrue(self.cp._ctrls.get_ctrl_by_name("masterSw").state)
+        played = [c.args[0] for c in self.cp._audioctrl.sysaudio_play.call_args_list]
+        self.assertNotIn(aevent.SYSTEM_ON, played)
+
+    def test_aiButtonAfterDismiss_chimeThenPreparedBriefing(self):
+        # arrange
+        self.ring()
+        self.press(2)
+        self.assertTrue(self.process_until(lambda: self.cp.ai.morningBreifing.called))
+
+        # act
+        self.press(69)
+
+        # assert
+        self.assertTrue(self.process_until(lambda: self.cp.morning.state == State.DONE))
+        self.cp.ai.morningBreifing.assert_called_once()  # prepared, not again
+        self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.CHIME_SPEAK, block=True)
         self.cp._audioctrl.play_bytes.assert_called_once_with(self.cp.ai.audio)
+        self.cp._audioctrl.volume_override.assert_called_with(False, 70)
+
+    def test_briefingFails_playsFailedAndRoutineGoesOn(self):
+        # arrange
+        self.cp.ai.morningBreifing.side_effect = RuntimeError("no network")
+        with self.assertLogs("daemon.ctrlPanel", "ERROR"):
+            self.ring()
+            self.press(2)
+
+            # act
+            self.press(69)
+            done = self.process_until(lambda: self.cp.morning.state == State.DONE)
+
+        # assert
+        self.assertTrue(done)
+        self.cp._audioctrl.sysaudio_play.assert_any_call(aevent.FAILED)
+
+    def test_cancelledSunrise_turnsBothStripsOff(self):
+        # act
+        self.cp.morning._actions.sunrise_release(off=True)
+
+        # assert
+        self.assertEqual(
+            [mock.call(False, 0), mock.call(False, 1)],
+            self.cp.wled_instance.set_wled_state.call_args_list,
+        )
+
+    def test_statusReply_isNotInput(self):
+        # arrange
+        self.ring()
+
+        # act
+        self.cp._events.put(Packet(HWEvent.STATUS, 2, 1))
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assertEqual(State.RINGING, self.cp.morning.state)
+
+
+class TestMorningTest(EventLoopTestCase):
+    def test_signal_runsCompressedRoutine_thenRealOneIsBack(self):
+        # arrange
+        real = self.cp.morning
+
+        # act
+        self.cp.post(MorningTest())
+        self.cp.process(max_wait=0)
+
+        # assert
+        test = self.cp.morning
+        self.assertIsNot(real, test)
+        self.assertEqual(State.ARMED, test.state)
+        self.assertEqual(1, test._cfg.sunrise_minutes)
+        self.assertEqual(9, test._cfg.alarm_ramp_seconds)
+        test._handled = test._alarm  # as after a finished run
+        test.state = State.IDLE
+        self.cp.process(max_wait=0)
+        self.assertIs(real, self.cp.morning)
+        self.assertIs(self.cp._config, self.cp._morning_cfg)
+
+    def test_calendarDuringTest_goesToTheRealRoutine(self):
+        # arrange
+        real = self.cp.morning
+        self.cp.start_morning_test()
+
+        # act
+        self.cp._events.put(CalendarAlarm(minutes_from_now(600)))
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assertEqual(State.ARMED, real.state)
+
+    def test_whileRinging_isIgnored(self):
+        # arrange
+        self.cp._events.put(CalendarAlarm(minutes_from_now(-1)))
+        self.cp.process(max_wait=0)
+
+        # act
+        with self.assertLogs("daemon.ctrlPanel", "WARNING"):
+            self.cp.start_morning_test()
+
+        # assert
+        self.assertIs(self.cp._real_morning, self.cp.morning)
 
 
 class TestAiButton(EventLoopTestCase):

@@ -6,11 +6,8 @@ import threading
 import serial
 import json
 import time
-from typing import Callable, Dict, Any, NamedTuple, Optional, Sequence
+from typing import Dict, Any, NamedTuple, Optional, Sequence
 from typing import List
-
-from daemon import sunrise
-from daemon.config import Config
 
 
 logger = logging.getLogger("daemon.WLED")
@@ -82,11 +79,9 @@ class WLED:
         self.command_queue = queue.Queue(maxsize=10)
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
-        self.sunrise_thread = None
         self.sending_thread = None
         self._uart_port = uart_port
         self._baud_rate = baud_rate
-        self._accept_commands: bool = True
         self._ser_timeout = 2
         self._ser: serial.Serial | None = None
         self._next_open_attempt = 0.0
@@ -104,14 +99,14 @@ class WLED:
         self.sending_thread.start()
 
     def stop(self) -> None:
-        """Stops the sunrise and sender threads, then closes the UART.
+        """Stops the sender thread, then closes the UART.
         Safe to call more than once, and before start()."""
         self._stop_event.set()
-        for thread in (self.sunrise_thread, self.sending_thread):
-            if thread is not None and thread.is_alive():
-                thread.join(self.THREAD_JOIN_TIMEOUT)
-                if thread.is_alive():
-                    logger.error("%s is still alive", thread.name)
+        thread = self.sending_thread
+        if thread is not None and thread.is_alive():
+            thread.join(self.THREAD_JOIN_TIMEOUT)
+            if thread.is_alive():
+                logger.error("%s is still alive", thread.name)
         self.sending_thread = None
         if self._ser is not None:
             self._close_port()
@@ -183,53 +178,11 @@ class WLED:
 
         return WledStateSnapshot(wled_state, seg_count, segs)
 
-    def do_sunrise(
-        self, dur_sec: int = 20 * 60, p_callback: Callable[[], None] = None
-    ) -> None:
-        """
-        Runs the sunrise curve (daemon/sunrise.py) on both segments for
-        dur_sec seconds. Returns immediately; a child thread does the work.
-        Panel input to WLED is ignored until it is done.
-
-        :param dur_sec: Duration of the Sunrise effect in seconds
-        :type dur_sec: int
-        :param p_callback: Function to be called once the effect is complete
-        :type p_callback: Callable[[], None]
-        """
-        if self.sunrise_thread is not None and self.sunrise_thread.is_alive():
-            return
-        self.sunrise_thread = threading.Thread(
-            target=self._do_sunrise,
-            kwargs=dict(dur_sec=dur_sec, p_callback=p_callback),
-            name="wled-sunrise",
-            daemon=True,
-        )
-        self.sunrise_thread.start()  # Start the sending thread
-
-    def _do_sunrise(self, dur_sec: int, p_callback: Callable[[], None] = None) -> None:
-        # User is not allowed to use WLED until Sunrise effect is complete
-        self._accept_commands = False
-        tick = Config.sunrise_tick_seconds
-        started = time.monotonic()
-        try:
-            while True:
-                progress = (time.monotonic() - started) / dur_sec
-                self.set_both(*sunrise.frame(progress), transition=tick)
-                if progress >= 1:
-                    break
-                if self._stop_event.wait(tick):
-                    return
-        finally:
-            self._accept_commands = True
-        if p_callback is not None:
-            p_callback()
-
     def set_both(
         self, brightness: int, rgbw: Sequence[int], transition: float = 0
     ) -> None:
         """Turns both segments on, effect off, with this brightness (0-255)
-        and RGBW colour. WLED fades to it over `transition` seconds.
-        Not blocked by the sunrise, which uses it."""
+        and RGBW colour. WLED fades to it over `transition` seconds."""
         seg = {
             "on": True,
             "fx": 0,
@@ -242,7 +195,7 @@ class WLED:
             "transition": round(transition * 10),  # in 100 ms
             "seg": [{"id": 0, **seg}, {"id": 1, **seg}],
         }
-        self._enqueue_command(data_to_send, True)
+        self._enqueue_command(data_to_send)
 
     def set_color(self, color: List[int], segment: int) -> None:
         # fx = 0 (Turn off effect)
@@ -282,10 +235,8 @@ class WLED:
         }
         self._enqueue_command(data_to_send)
 
-    def _enqueue_command(self, command: dict, lock_override: bool = False) -> None:
+    def _enqueue_command(self, command: dict) -> None:
         """Thread-safe function to add commands to the queue."""
-        if not self._accept_commands and not lock_override:
-            return
         with self.lock:
             if self.command_queue.full():
                 # Discard the oldest command (first in queue)

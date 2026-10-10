@@ -74,35 +74,6 @@ class TestWledFrame(unittest.TestCase):
                 {k: v for k, v in seg.items() if k != "id"},
             )
 
-    def test_setBoth_passesDuringSunrise(self):
-        # arrange
-        wled = WLED()
-        wled._accept_commands = False
-
-        # act
-        wled.set_both(10, RED)
-        wled.set_brightness(10, 0)
-
-        # assert: only the frame got through
-        self.assertEqual(1, wled.command_queue.qsize())
-
-    @mock.patch.object(Config, "sunrise_tick_seconds", 0.01)
-    def test_doSunrise_endsAtEndStateAndCallsBack(self):
-        # arrange
-        wled = WLED()
-        frames = []
-        wled.set_both = lambda bri, rgbw, transition: frames.append((bri, rgbw))
-        done = mock.Mock()
-
-        # act
-        wled._do_sunrise(0.1, done)
-
-        # assert
-        self.assertEqual(tuple(sunrise.frame(1.0)), frames[-1])
-        self.assertGreater(len(frames), 2)
-        done.assert_called_once_with()
-        self.assertTrue(wled._accept_commands)
-
 
 if __name__ == "__main__":
     unittest.main()

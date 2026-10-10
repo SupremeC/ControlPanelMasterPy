@@ -5,19 +5,21 @@ Packets from the Mega go into the same queue as plain Packet objects.
 
 from concurrent.futures import Future
 from dataclasses import dataclass
+import datetime
 from typing import Any, Callable
 
 
 @dataclass(frozen=True)
 class CalendarAlarm:
-    """The wake-up alarm in the calendar is due."""
+    """The calendar was fetched. `alarm` is the next wake-up alarm (an
+    overdue one within the late-start grace included), or None."""
+
+    alarm: datetime.datetime | None
 
 
 @dataclass(frozen=True)
-class SunriseDue:
-    """The wake-up alarm is `minutes` away; time to start the sunrise."""
-
-    minutes: int
+class MorningTest:
+    """Run the whole morning routine compressed, starting now (SIGUSR1)."""
 
 
 @dataclass(frozen=True)

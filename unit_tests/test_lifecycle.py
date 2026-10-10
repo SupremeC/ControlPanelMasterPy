@@ -125,14 +125,14 @@ class TestWledLifecycle(unittest.TestCase):
 class TestCalendarLifecycle(unittest.TestCase):
     def test_constructor_startsNoThread(self):
         # act
-        cal = Calender(None, None)
+        cal = Calender()
 
         # assert
         self.assertIsNone(cal.cal_updater_thread)
 
     def test_stop_beforeStartIsNoop(self):
         # arrange
-        cal = Calender(None, None)
+        cal = Calender()
 
         # act / assert (no exception)
         cal.stop()
@@ -141,7 +141,7 @@ class TestCalendarLifecycle(unittest.TestCase):
     @mock.patch.object(Calender, "fetch", return_value=False)
     def test_stop_wakesThreadDuringUpdateInterval(self, _get_events):
         # arrange
-        cal = Calender(None, None)
+        cal = Calender()
         cal.start()
         thread = cal.cal_updater_thread
         self.assertTrue(_wait_until(lambda: _get_events.called))
@@ -172,7 +172,7 @@ class TestCalendarTokens(unittest.TestCase):
     @mock.patch("daemon.gCalender.build")
     def test_noTokenFile_logsAndSkips(self, mock_build):
         # arrange
-        cal = Calender(None, None, token_file=self.token)
+        cal = Calender(token_file=self.token)
 
         # act
         with self.assertLogs("daemon.gCalender", "ERROR"):
@@ -188,7 +188,7 @@ class TestCalendarTokens(unittest.TestCase):
         # arrange
         self.token.write_text("{}")
         mock_load.return_value = self._creds(refresh_error=RefreshError("revoked"))
-        cal = Calender(None, None, token_file=self.token)
+        cal = Calender(token_file=self.token)
 
         # act
         with self.assertLogs("daemon.gCalender", "ERROR"):
@@ -202,7 +202,7 @@ class TestCalendarTokens(unittest.TestCase):
         # arrange
         self.token.write_text("{}")
         mock_load.return_value = self._creds()
-        cal = Calender(None, None, token_file=self.token)
+        cal = Calender(token_file=self.token)
 
         # act
         ok = cal.refresh_tokens()
@@ -216,7 +216,7 @@ class TestCalendarTokens(unittest.TestCase):
         # arrange
         self.token.write_text("{}")
         mock_load.return_value = self._creds(valid=True, expired=False)
-        cal = Calender(None, None, token_file=self.token)
+        cal = Calender(token_file=self.token)
 
         # act / assert
         self.assertTrue(cal.refresh_tokens())

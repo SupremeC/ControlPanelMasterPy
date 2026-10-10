@@ -2,6 +2,7 @@
 
 from concurrent.futures import Future
 from contextlib import ExitStack
+import dataclasses
 import datetime
 import heapq
 import itertools
@@ -13,7 +14,7 @@ from typing import Any, Callable, List
 
 from .component import Component
 from .config import Config
-from .events import CalendarAlarm, JobDone, PlaybackChanged, SunriseDue
+from .events import CalendarAlarm, JobDone, MorningTest, PlaybackChanged
 from .workers import Workers
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import AudioCtrl, SysAudioEvent as aevent, EffectType
@@ -21,7 +22,9 @@ from .ctrls import CtrlNotFoundException, HwCtrls, LEDCtrl
 from .packet import HWEvent, Packet, BlinkTarget  # noqa
 from daemon.packet_serial import PacketSerial
 from daemon.openaiWrapper import OpenAiWrapper
-from daemon.gCalender import Calender
+from daemon.gCalender import TIMEZONE, Calender
+from daemon.morning import MorningRoutine, State as MorningState
+from daemon import sunrise
 
 logger = logging.getLogger("daemon.ctrlPanel")
 # The serial buffer of Arduino is increased to 256 bytes (if it works)
@@ -36,7 +39,8 @@ logger = logging.getLogger("daemon.ctrlPanel")
 MAX_PACKETS_IN_SEND_QUEUE = 200
 MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
 DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
-BRIEFING_DELAY = 5  # seconds between stopping the alarm and the briefing
+BRIEFING_RETRY_DELAY = 60  # seconds before a failed briefing is generated again
+MORNING_TEST_LEAD = 120  # seconds from SIGUSR1 to the test alarm
 BED_LAMP_PULSE = 0.1  # seconds the bed lamp relay is pulsed
 EFFECT_BUTTONS = {
     17: EffectType.BITCRUSH,
@@ -55,8 +59,12 @@ class ControlPanel:
 
     Everything that changes panel state runs on the main thread, one event
     at a time (see process()). Other threads only post events: the serial
-    reader posts Packets, the calendar posts CalendarAlarm/SunriseDue, the
-    audio monitor posts PlaybackChanged, and background jobs post JobDone.
+    reader posts Packets, the calendar posts CalendarAlarm, the audio
+    monitor posts PlaybackChanged, and background jobs post JobDone.
+
+    The morning routine (daemon/morning.py) gets the calendar's alarm and
+    sees every switch input first, even with the master switch off, so
+    the alarm always rings and can always be dismissed.
     """
 
     demo_on: bool = False
@@ -88,11 +96,9 @@ class ControlPanel:
         self._stopped: bool = False
         self._components_stack = ExitStack()
         self.demo_on: bool = False
-        self.alarm_on: bool = False
         self.btnLeds: bool = True
         self.cal = Calender(
-            lambda: self._events.put(CalendarAlarm()),
-            lambda minutes: self._events.put(SunriseDue(minutes)),
+            lambda alarm: self._events.put(CalendarAlarm(alarm)),
             token_file=self._config.google_token_file,
             update_interval=self._config.calendar_update_interval,
             config=self._config,
@@ -102,6 +108,26 @@ class ControlPanel:
             lambda playing: self._events.put(PlaybackChanged(playing))
         )
         self.wled_instance = WLED(self._config.wled_port, self._config.wled_baud)
+        # Written and read only on the AI lane, so jobs see it in order.
+        self._briefing_audio: bytes | None = None
+        self._briefing_retried = False
+        # The test routine (SIGUSR1) replaces the real one while it runs.
+        self._morning_cfg = self._config
+        self._real_morning = self._new_morning(self._config)
+        self.morning = self._real_morning
+
+    def _new_morning(self, config: Config) -> MorningRoutine:
+        return MorningRoutine(
+            _MorningActions(self),
+            lambda: datetime.datetime.now(TIMEZONE),
+            self.call_later,
+            config,
+        )
+
+    def post(self, event: Any) -> None:
+        """Queues an event for the main thread. Safe from any thread and
+        from a signal handler."""
+        self._events.put(event)
 
     def _components(self) -> list[tuple[str, Component]]:
         """Components in start order. The job lanes come last so they
@@ -126,6 +152,7 @@ class ControlPanel:
                 stack.callback(self._stop_component, name, component)
             self._components_stack = stack.pop_all()
         self.reset()
+        self._real_morning.start()
 
     def stop(self):
         """Stops all started components in reverse order.
@@ -171,9 +198,9 @@ class ControlPanel:
             elif isinstance(event, PlaybackChanged):
                 self.speakerLeds(event.playing)
             elif isinstance(event, CalendarAlarm):
-                self.on_cal_alarm()
-            elif isinstance(event, SunriseDue):
-                self.on_cal_sunrise(event.minutes)
+                self._real_morning.set_alarm(event.alarm)
+            elif isinstance(event, MorningTest):
+                self.start_morning_test()
             else:
                 logger.warning("Unknown event %r", event)
         except Exception:
@@ -182,6 +209,7 @@ class ControlPanel:
     def _tick(self) -> None:
         self._resync_if_needed()
         self._demo_step()
+        self._end_morning_test_if_done()
         if self.time_to_send_hello():
             self._pserial.send_hello()
             self._last_sent_hello = datetime.datetime.now()
@@ -281,6 +309,12 @@ class ControlPanel:
             inputsw = self._ctrls.get_ctrl_by_name("InputsSw")
             soundsw = self._ctrls.get_ctrl_by_name("SoundSw")
 
+            # Before the master switch check: the alarm can be dismissed
+            # with the panel switched off.
+            if not no_action and self.morning.on_input(packet.target, packet.val):
+                self._track_main_switches(packet)
+                return
+
             if packet.target == 12:  # MainSwitch
                 mastersw.state = bool(packet.val)
                 if mastersw.state:
@@ -311,12 +345,6 @@ class ControlPanel:
             if self.demo_on and packet.target not in range(54, 63):  # analog ctrls
                 self.demo_on = False
                 return
-            if self.alarm_on and packet.target not in range(54, 63):  # analog ctrls
-                self.alarm_on = False
-                self._audioctrl.stop_alarm()
-                self.call_later(BRIEFING_DELAY, self._start_morning_briefing)
-                return
-
             if not mastersw.state or not inputsw.state:
                 return
 
@@ -396,6 +424,19 @@ class ControlPanel:
         finally:
             if not no_action:
                 self.send_packets(p_tosend)
+
+    def _track_main_switches(self, packet: Packet) -> None:
+        """The morning routine used this input: keep the master, inputs
+        and sound switch states in step, without their sounds and actions."""
+        if packet.target == 12:
+            self._ctrls.get_ctrl_by_name("masterSw").state = bool(packet.val)
+            return
+        for name in ("InputsSw", "SoundSw"):
+            ctrl = self._ctrls.get_ctrl_by_name(name)
+            if packet.target == ctrl.pin:
+                self.send_packets(ctrl.set_state(bool(packet.val)))
+                if name == "SoundSw":
+                    self._audioctrl.enable_sound(bool(packet.val))
 
     def apply_soundeffect(self, packet: Packet):
         btn = self._ctrls.get_ctrl(packet.target)
@@ -530,15 +571,81 @@ class ControlPanel:
             on_error=failed,
         )
 
-    def _start_morning_briefing(self) -> None:
-        if self._is_running(self._ai_job):
-            logger.warning("AI is still busy. Skipping the morning briefing")
-            return
-        self._ai_job = self._run_job(
-            self._ai_jobs, "morning-briefing", self._morning_briefing
+    # ---- morning routine ------------------------------------------------
+
+    def _briefing_prepare(self, retry: bool = False) -> None:
+        """Generates the briefing on the AI lane, ahead of time."""
+        if not retry:
+            self._briefing_retried = False
+
+        def failed(_error: BaseException) -> None:
+            # Already logged. Quietly: this runs before the alarm.
+            if not self._briefing_retried:
+                self._briefing_retried = True
+                self.call_later(BRIEFING_RETRY_DELAY, self._briefing_prepare, True)
+
+        self._run_job(
+            self._ai_jobs, "briefing-prepare", self._prepare_briefing, on_error=failed
         )
 
-    # The three jobs below run on the AI lane, not on the main thread.
+    def _briefing_play(self) -> None:
+        """Chime, then the briefing, on the AI lane. Tells the routine
+        when it is over, whether it played or not."""
+        routine = self.morning
+
+        def failed(_error: BaseException) -> None:
+            self._audioctrl.sysaudio_play(aevent.FAILED)
+            routine.briefing_finished()
+
+        self._ai_job = self._run_job(
+            self._ai_jobs,
+            "briefing",
+            self._play_briefing,
+            on_done=lambda _result: routine.briefing_finished(),
+            on_error=failed,
+        )
+
+    def start_morning_test(self) -> None:
+        """Runs the routine compressed: alarm in MORNING_TEST_LEAD seconds,
+        a 1 min sunrise and the other times a tenth. The real routine
+        keeps following the calendar meanwhile."""
+        busy = self._real_morning.state not in (MorningState.IDLE, MorningState.ARMED)
+        if self.morning is not self._real_morning or busy:
+            logger.warning("morning test: a morning routine is running. Ignored")
+            return
+        cfg = self._config
+        test_cfg = dataclasses.replace(
+            cfg,
+            sunrise_minutes=1,
+            alarm_ramp_seconds=cfg.alarm_ramp_seconds / 10,
+            alarm_cycle_seconds=cfg.alarm_cycle_seconds / 10,
+            alarm_give_up_minutes=cfg.alarm_give_up_minutes / 10,
+            briefing_prepare_lead_minutes=1,
+            briefing_delay_seconds=cfg.briefing_delay_seconds / 10,
+            rering_after_seconds=cfg.rering_after_seconds / 10,
+            late_start_grace_minutes=cfg.late_start_grace_minutes / 10,
+        )
+        alarm = datetime.datetime.now(TIMEZONE) + datetime.timedelta(
+            seconds=MORNING_TEST_LEAD
+        )
+        logger.info("morning test: alarm at %s, times compressed", f"{alarm:%H:%M:%S}")
+        self._morning_cfg = test_cfg
+        self.morning = self._new_morning(test_cfg)
+        self.morning.start()
+        self.morning.set_alarm(alarm)
+
+    def _end_morning_test_if_done(self) -> None:
+        test = self.morning
+        if test is self._real_morning:
+            return
+        if test.state != MorningState.IDLE or test.handled_alarm is None:
+            return
+        test.stop()
+        self.morning = self._real_morning
+        self._morning_cfg = self._config
+        logger.info("morning test: finished")
+
+    # The jobs below run on the AI lane, not on the main thread.
 
     def _ask_ai(self, wav_path) -> None:
         self.ai._send_audio_chat(AudioCtrl._read_wav_file(wav_path))
@@ -549,23 +656,27 @@ class ControlPanel:
         self.ai.upcomingEvents(self.cal.todays_events())
         self._audioctrl.play_bytes(self.ai.audio)
 
-    def _morning_briefing(self) -> None:
+    def _generate_briefing(self) -> bytes:
         self.cal.fetch()
         self.ai.morningBreifing(self.cal.todays_events())
-        self._audioctrl.play_bytes(self.ai.audio)
+        return self.ai.audio
+
+    def _prepare_briefing(self) -> None:
+        self._briefing_audio = None
+        self._briefing_audio = self._generate_briefing()
+
+    def _play_briefing(self) -> None:
+        audio, self._briefing_audio = self._briefing_audio, None
+        if audio is None:
+            audio = self._generate_briefing()
+        self._audioctrl.sysaudio_play(aevent.CHIME_SPEAK, block=True)
+        self._audioctrl.play_bytes(audio)
 
     def speakerLeds(self, on: bool) -> None:
         if on:
             self.send_packets(Packet(HWEvent.BLINKFOREVER, BlinkTarget.SPEAKER_LEDS, 1))
         else:
             self.send_packets(Packet(HWEvent.BLINKFOREVER, BlinkTarget.SPEAKER_LEDS, 0))
-
-    def on_cal_alarm(self) -> None:
-        self.alarm_on = True
-        self._audioctrl.sysaudio_play(aevent.ALARM, False, 20)
-
-    def on_cal_sunrise(self, duration: int) -> None:
-        self.wled_instance.do_sunrise(duration * 60)
 
     def ledstrip_control(self, packet: Packet):
         """Sends commands (translated from packet) to LED-strip"""
@@ -687,6 +798,45 @@ class ControlPanel:
             logger.debug("SendQueue is now cleared.")
         else:
             logger.debug("SendQueue is empty. Good")
+
+
+class _MorningActions:
+    """MorningRoutine's Actions (see daemon/morning.py), done with the
+    panel's parts. Called on the main thread; nothing here blocks."""
+
+    def __init__(self, cp: ControlPanel):
+        self._cp = cp
+
+    def sunrise_frame(self, progress: float) -> None:
+        cfg = self._cp._morning_cfg
+        frame = sunrise.frame(progress, cfg)
+        self._cp.wled_instance.set_both(*frame, transition=cfg.sunrise_tick_seconds)
+
+    def sunrise_release(self, off: bool = False) -> None:
+        if off:
+            for segment in (0, 1):
+                self._cp.wled_instance.set_wled_state(False, segment)
+
+    def alarm_start(self, level: int) -> None:
+        self._cp._audioctrl.alarm_start(level)
+
+    def alarm_set_level(self, level: int) -> None:
+        self._cp._audioctrl.alarm_set_level(level)
+
+    def alarm_stop(self) -> None:
+        self._cp._audioctrl.alarm_stop()
+
+    def chime(self, kind: str) -> None:
+        self._cp._audioctrl.sysaudio_play({"off": aevent.CHIME_OFF}[kind])
+
+    def volume_override(self, on: bool) -> None:
+        self._cp._audioctrl.volume_override(on, self._cp._morning_cfg.alarm_volume)
+
+    def briefing_prepare(self) -> None:
+        self._cp._briefing_prepare()
+
+    def briefing_play(self) -> None:
+        self._cp._briefing_play()
 
 
 if __name__ == "__main__":

@@ -95,7 +95,6 @@ class AudioCtrl:
         self.on_play_change: Callable = p_callback_onchange
         self.rec_time = None
         self._current_filepath = None
-        self.alarm_sound: mixer.Sound | None = None
         self.alarm_channel: mixer.Channel | None = None
         # Set while the morning routine holds the volume (0.0-1.0).
         self._override_volume: float | None = None
@@ -226,11 +225,6 @@ class AudioCtrl:
             check=True,
         )
 
-    def stop_alarm(self) -> None:
-        if self.alarm_sound is not None:
-            self.alarm_sound.stop()
-            self.alarm_sound = None
-
     def alarm_start(self, level: int) -> None:
         """Loops the alarm sound on its own channel at level (percent),
         whatever the pot, the sound switch and the override say.
@@ -283,8 +277,6 @@ class AudioCtrl:
         sound = mixer.Sound(self.systemsounds[key])
         sound.set_volume(self.get_volume())
         mixer.find_channel(force=True).play(sound, loops=repeat)
-        if event == SysAudioEvent.ALARM:
-            self.alarm_sound = sound
         if block:
             while mixer.get_busy():
                 time.sleep(0.1)

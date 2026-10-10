@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Calender: alarm detection, today's events, the refetch schedule, the
-21:00 check for tomorrow's alarm and the temporary sunrise/alarm
-callbacks. The Google service and the clock are fakes; nothing here
+21:00 check for tomorrow's alarm and the on_fetched callback. The Google service and the clock are fakes; nothing here
 touches the network or starts the thread.
 """
 
@@ -38,9 +37,8 @@ class CalendarTestCase(unittest.TestCase):
         self.list_call.return_value.execute.side_effect = lambda: {
             "items": self.items
         }
-        self.on_alarm = mock.Mock()
-        self.on_sunrise = mock.Mock()
-        self.cal = Calender(self.on_alarm, self.on_sunrise, now=lambda: self.now)
+        self.on_fetched = mock.Mock()
+        self.cal = Calender(self.on_fetched, now=lambda: self.now)
         self.cal.refresh_tokens = mock.Mock(return_value=True)
 
     def fetched(self, *items: dict) -> Calender:
@@ -287,54 +285,43 @@ class TestTomorrowCheck(CalendarTestCase):
             self.cal._update()
 
 
-class TestOldCallbacks(CalendarTestCase):
-    def setUp(self):
-        super().setUp()
-        self.items = [timed("wakeUpAlarm", "2026-10-10 07:00")]
+class TestOnFetched(CalendarTestCase):
+    def test_reportsNextAlarm(self):
+        # act
+        self.fetched(timed("wakeUpAlarm", "2026-10-11 06:45"))
 
-    def run_at(self, *times: str) -> None:
-        for t in times:
-            self.now = at(t)
-            self.cal._update()
+        # assert
+        self.on_fetched.assert_called_once_with(at("2026-10-11 06:45"))
 
-    def test_sunriseAtThirtyMinutesBefore_alarmAtTime_eachOnce(self):
-        # act / assert
-        self.run_at("2026-10-10 06:29")
-        self.on_sunrise.assert_not_called()
-        self.run_at("2026-10-10 06:30", "2026-10-10 06:31")
-        self.on_sunrise.assert_called_once_with(30)
-        self.on_alarm.assert_not_called()
-        self.run_at("2026-10-10 07:00", "2026-10-10 07:01", "2026-10-10 07:20")
-        self.on_alarm.assert_called_once_with()
+    def test_slightlyOverdueAlarm_isStillReported(self):
+        # arrange: the daemon restarted 10 min after the alarm
+        self.now = at("2026-10-10 07:10")
 
-    def test_deletedAlarm_firesNothing(self):
+        # act
+        self.fetched(timed("wakeUpAlarm", "2026-10-10 07:00"))
+
+        # assert
+        self.on_fetched.assert_called_once_with(at("2026-10-10 07:00"))
+
+    def test_longOverdueAlarm_isNot(self):
         # arrange
-        self.run_at("2026-10-10 06:00")
-        self.items = []
-        self.cal._next_fetch = None  # due now
+        self.now = at("2026-10-10 07:20")
 
         # act
-        self.run_at("2026-10-10 06:30", "2026-10-10 07:00")
+        self.fetched(timed("wakeUpAlarm", "2026-10-10 07:00"))
 
         # assert
-        self.on_sunrise.assert_not_called()
-        self.on_alarm.assert_not_called()
+        self.on_fetched.assert_called_once_with(None)
 
-    def test_restartShortlyAfterAlarm_ringsWithoutSunrise(self):
+    def test_failedFetch_reportsNothing(self):
+        # arrange
+        self.cal.refresh_tokens.return_value = False
+
         # act
-        self.run_at("2026-10-10 07:10")
+        self.cal.fetch()
 
         # assert
-        self.on_alarm.assert_called_once_with()
-        self.on_sunrise.assert_not_called()
-
-    def test_restartLongAfterAlarm_doesNotRing(self):
-        # act
-        self.run_at("2026-10-10 07:20")
-
-        # assert
-        self.on_sunrise.assert_not_called()
-        self.on_alarm.assert_not_called()
+        self.on_fetched.assert_not_called()
 
 
 if __name__ == "__main__":

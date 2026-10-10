@@ -49,17 +49,16 @@ class Calender:
     returns the next one. At `alarm_check_at` the log says whether tomorrow
     has an alarm.
 
-    The thread also fires the old callbacks: on_sunrise(minutes) when the
-    next alarm is `sunrise_minutes` away and on_alarm() when it is due.
-    They go away when MorningRoutine owns the timing.
+    After every successful fetch, on_fetched(alarm) gets the next alarm,
+    including one overdue by less than `late_start_grace_minutes`. It runs
+    on the fetching thread, so it should only post an event.
     """
 
     THREAD_JOIN_TIMEOUT = 2  # seconds
 
     def __init__(
         self,
-        p_callback_alarm: Callable[[], None],
-        p_callback_sr: Callable[[int], None],
+        on_fetched: Callable[[datetime.datetime | None], None] | None = None,
         token_file: Path = Config.google_token_file,
         update_interval: float = Config.calendar_update_interval,
         config: Config | None = None,
@@ -73,7 +72,6 @@ class Calender:
         self._refetch_far = datetime.timedelta(seconds=cfg.calendar_refetch_far)
         self._refetch_near_from: datetime.time = cfg.calendar_refetch_near_from
         self._alarm_check_at: datetime.time = cfg.alarm_check_at
-        self._sunrise = datetime.timedelta(minutes=cfg.sunrise_minutes)
         self._late_grace = datetime.timedelta(minutes=cfg.late_start_grace_minutes)
         self._now = now
         # If modifying these scopes, delete the file token.json.
@@ -86,16 +84,12 @@ class Calender:
         self._fetch_lock = threading.Lock()
         self._next_fetch: datetime.datetime | None = None
         self._checked_tomorrow: datetime.date | None = None
-        self._sunrise_fired: datetime.datetime | None = None
-        self._alarm_fired: datetime.datetime | None = None
-        self.on_alarm = p_callback_alarm
-        self.on_sunrise = p_callback_sr
+        self._on_fetched = on_fetched
         self._stop_event = threading.Event()
         self.cal_updater_thread: threading.Thread | None = None
 
     def start(self) -> None:
-        """Starts the thread that refetches the events and fires
-        the sunrise and alarm callbacks."""
+        """Starts the thread that refetches the events."""
         if self.cal_updater_thread is not None:
             return
         self._stop_event.clear()
@@ -136,15 +130,13 @@ class Calender:
             self._stop_event.wait(self.UPDATE_INTERVAL)
 
     def _update(self) -> None:
-        """One round of the thread: refetch if due, then the 21:00 check
-        and the old callbacks."""
+        """One round of the thread: refetch if due, then the 21:00 check."""
         now = self._now()
         if self._next_fetch is None or now >= self._next_fetch:
             fetched = self.fetch()
             self._next_fetch = self._next_fetch_time(now)
             if fetched:
                 self._check_tomorrow(now)
-        self._fire_callbacks(now)
 
     def _next_fetch_time(self, now: datetime.datetime) -> datetime.datetime:
         """15 min from 04:00 until today's alarm has rung, 2 h otherwise.
@@ -172,19 +164,6 @@ class Calender:
         else:
             logger.info("Wake-up alarm tomorrow at %s", alarm.strftime("%H:%M"))
 
-    def _fire_callbacks(self, now: datetime.datetime) -> None:
-        # An alarm that is a little overdue (slow refetch, daemon restart)
-        # still rings.
-        alarm = self.next_alarm(now - self._late_grace)
-        if alarm is None:
-            return
-        if self._sunrise_fired != alarm and alarm - self._sunrise <= now < alarm:
-            self._sunrise_fired = alarm
-            self.on_sunrise(int(self._sunrise.total_seconds() // 60))
-        if self._alarm_fired != alarm and now >= alarm:
-            self._alarm_fired = alarm
-            self.on_alarm()
-
     def fetch(self) -> bool:
         """Downloads today's and tomorrow's events. Blocking. On failure
         the events from the last fetch are kept and False is returned."""
@@ -211,7 +190,9 @@ class Calender:
                 len(self._events),
                 [a.strftime("%a %H:%M") for a in self._alarms],
             )
-            return True
+        if self._on_fetched is not None:
+            self._on_fetched(self.next_alarm(self._now() - self._late_grace))
+        return True
 
     def _list_events(
         self, window_start: datetime.datetime, window_end: datetime.datetime

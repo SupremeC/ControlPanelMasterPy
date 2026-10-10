@@ -100,6 +100,7 @@ class MorningRoutine:
         )
         self.state = State.IDLE
         self._started = False
+        self._stopped = False
         # The latest alarm from the calendar, and the one this run is for.
         self._pending: datetime.datetime | None = None
         self._alarm: datetime.datetime | None = None
@@ -121,6 +122,15 @@ class MorningRoutine:
             return
         self._started = True
         self._call_later(self._cfg.sunrise_tick_seconds, self._tick_loop)
+
+    def stop(self) -> None:
+        """Ends the tick. The routine does nothing more after this."""
+        self._stopped = True
+
+    @property
+    def handled_alarm(self) -> datetime.datetime | None:
+        """The alarm of the last finished run."""
+        return self._handled
 
     def set_alarm(self, alarm: datetime.datetime | None) -> None:
         """The next alarm from the calendar (None: there is none). Call
@@ -335,6 +345,8 @@ class MorningRoutine:
     # ---- helpers ------------------------------------------------------
 
     def _tick_loop(self) -> None:
+        if self._stopped:
+            return
         try:
             self.tick()
         except Exception:
