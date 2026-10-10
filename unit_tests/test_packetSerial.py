@@ -94,6 +94,37 @@ class Test_PacketSerial(unittest.TestCase):
         self.assertFalse(ps._sshutdown_flag.is_set(), "write Flag must be reset")
 
     @mock.patch("serial.Serial")
+    def test_close_connection_twiceIsNoop(self, mock_serial, mock_comports):
+        # arrange
+        fake_port = mock_serial.return_value
+        fake_port.is_open = True
+        fake_port.in_waiting = 0
+        ps = self._make(mock_comports)
+        ps.open_connection()
+
+        # act
+        ps.close_connection()
+        ps.close_connection()
+
+        # assert
+        fake_port.close.assert_called_once()
+        self.assertFalse(ps.is_conn_open)
+        self.assertIsNone(ps._readserial_thread)
+        self.assertIsNone(ps._writeserial_thread)
+
+    @mock.patch("serial.Serial")
+    def test_close_connection_beforeOpenIsNoop(self, mock_serial, mock_comports):
+        # arrange
+        ps = self._make(mock_comports)
+
+        # act
+        ps.close_connection()
+
+        # assert
+        mock_serial.return_value.close.assert_not_called()
+        self.assertFalse(ps.is_conn_open)
+
+    @mock.patch("serial.Serial")
     def test_Threading_sendQueueIsWrittenToPort(self, mock_serial, mock_comports):
         # arrange
         fake_port = mock_serial.return_value

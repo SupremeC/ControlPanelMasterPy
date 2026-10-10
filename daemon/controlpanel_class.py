@@ -41,6 +41,7 @@ class ControlPanel:
         self._pserial: PacketSerial = PacketSerial(
             self._packet_receivedqueue, self._packet_sendqueue
         )
+        self._stopped: bool = False
         self.demo_on: bool = False
         self.alarm_on: bool = False
         self.btnLeds: bool = True
@@ -60,16 +61,25 @@ class ControlPanel:
             logger.error(e)
 
     def stop(self):
-        """Closes serial connection and does general cleanup"""
-        try:
-            logger.info("ControlPanel stopping...")
-            self.demo_on = False
-            self.reset()
-            self._pserial.close_connection()
-            self.wled_instance.close_serial_conn()
-            self.cal.stop()
-        except Exception as e:
-            logger.error(e)
+        """Closes serial connection and does general cleanup.
+        Safe to call more than once."""
+        if self._stopped:
+            return
+        self._stopped = True
+        logger.info("ControlPanel stopping...")
+        self.demo_on = False
+        self.reset()
+        for name, stop in (
+            ("serial", self._pserial.close_connection),
+            ("wled", self.wled_instance.stop),
+            ("calendar", self.cal.stop),
+            ("audio", self._audioctrl.stop),
+        ):
+            try:
+                stop()
+            except Exception:
+                logger.exception("Stopping %s failed", name)
+        logger.info("ControlPanel stopped")
 
     def process(self) -> None:
         """Call this method regularly to process packets"""
@@ -177,8 +187,7 @@ class ControlPanel:
                     if self.demo_on:
                         self._audioctrl.sysaudio_play(aevent.DEMOMODE)
                         demo_thread = threading.Thread(
-                            target=self.wrapped_demo_run,
-                            kwargs=None,
+                            target=self.wrapped_demo_run, name="demo", daemon=True
                         )
                         demo_thread.start()
                 else:
@@ -333,6 +342,8 @@ class ControlPanel:
         self.ai_thread = threading.Thread(
             target=self.wrapped_ai_talk,
             kwargs=dict(btn=p_btn, audio_call=p_audio_call),
+            name="ai",
+            daemon=True,
         )
         self.ai_thread.start()
 

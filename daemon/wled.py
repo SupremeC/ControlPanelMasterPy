@@ -66,6 +66,8 @@ class WledStateSnapshot(NamedTuple):
 class WLED:
     """Sends commands to an WLED device via a Serial port"""
 
+    THREAD_JOIN_TIMEOUT = 2  # seconds
+
     def __init__(self, uart_port: str = "/dev/serial0", baud_rate: int = 460800):
         """
         Initialize the WLED instance.
@@ -77,9 +79,10 @@ class WLED:
         """
         self.command_queue = queue.Queue(maxsize=10)
         self.lock = threading.Lock()
+        self._stop_event = threading.Event()
         self.sunrise_thread = None
         self.sending_thread = threading.Thread(
-            target=self._send_cmd_from_queue, daemon=True
+            target=self._send_cmd_from_queue, name="wled-send", daemon=True
         )
         self.sending_thread.start()  # Start the sending thread
         self._uart_port = uart_port
@@ -113,9 +116,18 @@ class WLED:
                 logger.info(f"Failed to reestablish connection: {e}")
                 return None
 
-    def close_serial_conn(self) -> None:
-        logger.info("WLED serial connection closed")
-        self._ser.close()
+    def stop(self) -> None:
+        """Stops the sunrise and sender threads, then closes the UART.
+        Safe to call more than once."""
+        self._stop_event.set()
+        for thread in (self.sunrise_thread, self.sending_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(self.THREAD_JOIN_TIMEOUT)
+                if thread.is_alive():
+                    logger.error("%s is still alive", thread.name)
+        if self._ser.is_open:
+            self._ser.close()
+            logger.info("WLED serial connection closed")
 
     def set_wled_state(self, on: bool, segment: Optional[int] = None) -> None:
         """Set on/off state for a specific segment, or ALL
@@ -174,7 +186,10 @@ class WLED:
         if self.sunrise_thread is not None and self.sunrise_thread.is_alive():
             return
         self.sunrise_thread = threading.Thread(
-            target=self._do_sunrise, kwargs=dict(dur_sec=dur_sec, p_callback=p_callback)
+            target=self._do_sunrise,
+            kwargs=dict(dur_sec=dur_sec, p_callback=p_callback),
+            name="wled-sunrise",
+            daemon=True,
         )
         self.sunrise_thread.start()  # Start the sending thread
 
@@ -224,7 +239,9 @@ class WLED:
                 ],
             }
             self._enqueue_command(data_to_send, True)
-            time.sleep(steps_s)
+            if self._stop_event.wait(steps_s):
+                self._accept_commands = True
+                return
         self._accept_commands = True
         if p_callback is not None:
             p_callback()
@@ -295,10 +312,13 @@ class WLED:
 
     def _send_cmd_from_queue(self):
         """Thread function that sends commands from the queue."""
-        while True:
+        while not self._stop_event.is_set():
             try:
-                # Get command from the queue (blocks until an item is available)
-                command = self.command_queue.get()
+                # Wake up regularly to notice the stop event
+                command = self.command_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
                 self.check_serial_connection()
                 json_data = json.dumps(command)
                 self._ser.write((json_data + "\n").encode())

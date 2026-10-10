@@ -1,6 +1,5 @@
 import datetime
 import threading
-import time
 import logging
 import os.path
 from typing import Callable, List
@@ -21,6 +20,9 @@ logger = logging.getLogger("daemon.gCalender")
 
 
 class Calender:
+    UPDATE_INTERVAL = 60  # seconds
+    THREAD_JOIN_TIMEOUT = 2  # seconds
+
     def __init__(
         self, p_callback_alarm: Callable[[], None], p_callback_sr: Callable[[int], None]
     ):
@@ -33,16 +35,17 @@ class Calender:
         self.alarm: CEvent = None
         self.on_alarm = p_callback_alarm
         self.on_sunrise = p_callback_sr
-        self.cal_auto_update: bool = True
+        self._stop_event = threading.Event()
         self.cal_updater_thread = threading.Thread(
-            target=self.__cal_update,
-            kwargs=dict(),
+            target=self.__cal_update, name="calendar", daemon=True
         )
         self.cal_updater_thread.start()
 
     def stop(self) -> None:
-        """Stop Calender from updating itself"""
-        self.cal_auto_update = False
+        """Stop Calender from updating itself. Safe to call more than once."""
+        self._stop_event.set()
+        if self.cal_updater_thread.is_alive():
+            self.cal_updater_thread.join(self.THREAD_JOIN_TIMEOUT)
 
     def upcoming_events_today(self) -> List[CEvent]:
         if self.events is None:
@@ -59,7 +62,7 @@ class Calender:
 
     def __cal_update(self) -> None:
         """Downloads todays calender events/alarm"""
-        while self.cal_auto_update:
+        while not self._stop_event.is_set():
             swedish_timezone = pytz.timezone("Europe/Stockholm")
             try:
                 current_time = datetime.datetime.now(swedish_timezone)
@@ -86,7 +89,7 @@ class Calender:
                         self.on_alarm()
             except Exception as e:
                 logger.error(e)
-            time.sleep(60)
+            self._stop_event.wait(self.UPDATE_INTERVAL)
 
     def get_todays_events(self) -> List[CEvent]:
         self.refresh_tokens()

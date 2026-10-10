@@ -105,9 +105,16 @@ class AudioCtrl:
         print(f"Found {audioclipsfound} of audio clips")
 
         self._running = True  # Internal flag to control the thread's lifecycle
-        self._thread = threading.Thread(target=self.__playback_monitor)
-        self._thread.daemon = True
+        self._thread = threading.Thread(
+            target=self.__playback_monitor, name="audio-monitor", daemon=True
+        )
         self._thread.start()
+
+    def stop(self) -> None:
+        """Stops the playback monitor thread. Safe to call more than once."""
+        self._running = False
+        if self._thread.is_alive():
+            self._thread.join(1)
 
     @property
     def current_filepath(self):
@@ -264,6 +271,8 @@ class AudioCtrl:
             kwargs=dict(
                 infile=self.current_filepath, effect=p_effect, callback=p_callback
             ),
+            name="audio-effect",
+            daemon=True,
         )
         effectthread.start()
         self.effects_running = True

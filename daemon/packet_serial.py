@@ -50,6 +50,7 @@ class PacketSerial:
     BAUDRATE = 115200
     PACKET_DEVIDER = b"\x00"
     STORE_X_PACKETS_IN_HISTORY = 10
+    THREAD_JOIN_TIMEOUT = 2  # seconds
 
     def __init__(self, rqueue: Queue, squeue: Queue):
         self._port = self.find_port_to_arduino()
@@ -104,13 +105,13 @@ class PacketSerial:
             logger.info("Serial port is " + "open" if self._ser.is_open else "closed")
             if self._readserial_thread is None:
                 self._readserial_thread = threading.Thread(
-                    target=self._start_read_packets
+                    target=self._start_read_packets, name="serial-read", daemon=True
                 )
             if not self._readserial_thread.is_alive():
                 self._readserial_thread.start()
             if self._writeserial_thread is None:
                 self._writeserial_thread = threading.Thread(
-                    target=self._start_write_packets
+                    target=self._start_write_packets, name="serial-write", daemon=True
                 )
             if not self._writeserial_thread.is_alive():
                 self._writeserial_thread.start()
@@ -121,36 +122,28 @@ class PacketSerial:
     def close_connection(self) -> None:
         """Close serial connection.
 
-        Also shutdowns the 2 threads responsible for
-        reading and writing to the port.
+        Stops the 2 threads responsible for reading and writing
+        to the port first, then closes the port. Safe to call more
+        than once, and before open_connection().
         """
+        if self._ser is None:
+            return
+        logger.info("waiting for serial worker threads to stop...")
+        self._rshutdown_flag.set()
+        self._sshutdown_flag.set()
+        for thread in (self._readserial_thread, self._writeserial_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(self.THREAD_JOIN_TIMEOUT)
+                if thread.is_alive():
+                    logger.error("%s is still alive", thread.name)
+        self._readserial_thread = None
+        self._writeserial_thread = None
         try:
-            if self._ser is None:
-                return
             self._ser.close()
-            logger.info("waiting for serial worker threads to stop...")
-            self._rshutdown_flag.set()
-            self._sshutdown_flag.set()
-            if (
-                self._readserial_thread is not None
-                and self._readserial_thread.is_alive()
-            ):
-                self._readserial_thread.join(30)
-            if (
-                self._writeserial_thread is not None
-                and self._writeserial_thread.is_alive()
-            ):
-                self._writeserial_thread.join(30)
-
-            if self._readserial_thread.is_alive():
-                raise TimeoutError("_readserial_thread is still alive")
-            if self._writeserial_thread.is_alive():
-                raise TimeoutError("_writeserial_thread is still alive")
-            self._readserial_thread = None
-            self._writeserial_thread = None
-            logger.info("Worker threads stopped. PacketSerial: port closed")
-        except (TimeoutError, RuntimeError) as e:
-            logger.error(e)
+        except serial.SerialException:
+            logger.exception("Closing serial port failed")
+        self._ser = None
+        logger.info("PacketSerial: port closed")
 
     def send_hello(self) -> None:
         """Sends a Hello packet to ArduinoMega. Hopefully
@@ -178,10 +171,10 @@ class PacketSerial:
         while not self._rshutdown_flag.is_set():
             if self._ser is None:
                 logger.error("cannot read Serial when connection=None")
-                return
+                break
             if not self._ser.is_open:
                 logger.error("cannot read Serial when connection is closed")
-                return
+                break
             try:
                 while self._ser.in_waiting > 1:
                     # read until 'devider' (included) and remove
