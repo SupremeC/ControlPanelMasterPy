@@ -117,13 +117,18 @@ class Config:
     # the relay only pulses its toggle) and the bed socket are left alone.
     night_off_at: datetime.time = datetime.time(22, 30)
     night_until: datetime.time = datetime.time(5, 0)
-    night_off_sockets: tuple[int, ...] = (68,)  # the drawer (byrå) socket
+    night_off_sockets: tuple[int, ...] = (68,)  # the drawer (byrï¿½) socket
     # The same light as the WLED preset "Lowred": both segments on, no
     # effect. Set with WLED.set_both(), like the sunrise frames.
     night_strip_rgbw: tuple[int, int, int, int] = (255, 0, 34, 0)
     night_strip_brightness: int = 64
     night_strip_transition: float = 5  # seconds of fade
     night_tick_seconds: float = 30
+
+    # Remote control (daemon/remote.py, the web API). The WLED state is
+    # read on the WLED lane (up to 1.5 s) and cached; a state request
+    # older than this asks for a fresh read, which a later request sees.
+    wled_snapshot_max_age: float = 3  # seconds
 
     # Speech (daemon/speech.py): local Swedish templates, the text model
     # only for the joke and the clothing advice, then text-to-speech. One

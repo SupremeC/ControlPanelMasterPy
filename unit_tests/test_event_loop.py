@@ -37,6 +37,9 @@ class EventLoopTestCase(unittest.TestCase):
         cp = ControlPanel()
         cp._audioctrl = mock.Mock()
         cp._audioctrl.current_filepath = "/tmp/rec.wav"
+        cp._audioctrl.master_volume = 70
+        cp._audioctrl.get_volume.return_value = 0.7
+        cp._audioctrl.is_recording.return_value = False
         cp.wled_instance = mock.Mock()
         cp.ai = mock.Mock()
         cp.cal = mock.Mock()
@@ -823,6 +826,86 @@ class TestStatusResyncAtNight(EventLoopTestCase):
 
         # assert
         self.assertTrue(self.cp._ctrls.get_ctrl_by_name("masterSw").state)
+
+
+class TestCommands(EventLoopTestCase):
+    """The bridge for other threads: request() posts a Command, the main
+    thread runs the Remote command and resolves the Future."""
+
+    def test_fromOtherThread_resolvesOnMainThread(self):
+        # arrange
+        futures = []
+        thread = threading.Thread(target=lambda: futures.append(self.cp.request("state")))
+
+        # act
+        thread.start()
+        thread.join(1)
+        self.assertTrue(self.process_until(lambda: futures and futures[0].done()))
+
+        # assert
+        state = futures[0].result()
+        self.assertIn("sockets", state)
+
+    def test_unknownCommand_keyError(self):
+        # act
+        future = self.cp.request("nope")
+        self.process_until(future.done)
+
+        # assert
+        self.assertIsInstance(future.exception(), KeyError)
+
+    def test_refusedCommand_valueError(self):
+        # act: demo needs the master switch on
+        future = self.cp.request("set_demo", on=True)
+        self.process_until(future.done)
+
+        # assert
+        self.assertIsInstance(future.exception(), ValueError)
+        self.assertFalse(self.cp.demo_on)
+
+    def test_badArguments_typeError(self):
+        # act
+        future = self.cp.request("set_socket", nope=1)
+        self.process_until(future.done)
+
+        # assert
+        self.assertIsInstance(future.exception(), TypeError)
+
+    def test_commandReturningFuture_isChained(self):
+        # arrange: a command whose work runs on a job lane
+        job = lambda: self.cp._run_job(self.cp._audio_jobs, "slow", lambda: 42)
+        self.cp.remote.command = mock.Mock(return_value=job)
+
+        # act
+        future = self.cp.request("slow")
+        self.process_until(future.done)
+
+        # assert
+        self.assertEqual(42, future.result())
+
+    def test_commandReturningFailingFuture_passesTheError(self):
+        # arrange
+        def boom():
+            raise RuntimeError("lane failed")
+
+        job = lambda: self.cp._run_job(self.cp._audio_jobs, "slow", boom, on_error=lambda _e: None)
+        self.cp.remote.command = mock.Mock(return_value=job)
+
+        # act
+        future = self.cp.request("slow")
+        self.process_until(future.done)
+
+        # assert
+        self.assertIsInstance(future.exception(), RuntimeError)
+
+    def test_commandIsLogged_stateIsNot(self):
+        # act / assert
+        with self.assertLogs("daemon.ctrlPanel", "INFO") as logs:
+            self.cp.request("set_button_leds", on=False)
+            self.cp.request("state")
+            self.process_until(lambda: self.cp._events.empty())
+        remote_lines = [r.getMessage() for r in logs.records if r.getMessage().startswith("remote:")]
+        self.assertEqual(["remote: set_button_leds {'on': False}"], remote_lines)
 
 
 if __name__ == "__main__":

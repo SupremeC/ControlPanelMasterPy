@@ -129,6 +129,11 @@ class MorningRoutine:
         self._stopped = True
 
     @property
+    def alarm(self) -> datetime.datetime | None:
+        """The alarm the routine is following, or None."""
+        return self._alarm
+
+    @property
     def handled_alarm(self) -> datetime.datetime | None:
         """The alarm of the last finished run."""
         return self._handled

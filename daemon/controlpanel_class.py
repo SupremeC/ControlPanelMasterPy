@@ -14,9 +14,17 @@ from typing import Any, Callable, List
 
 from .component import Component
 from .config import Config
-from .events import CalendarAlarm, JobDone, MorningTest, NightTest, PlaybackChanged
+from .events import (
+    CalendarAlarm,
+    Command,
+    JobDone,
+    MorningTest,
+    NightTest,
+    PlaybackChanged,
+)
+from .remote import Remote
 from .workers import Workers
-from .wled import WLED  # WledStateSnapshot, SegmentState
+from .wled import WLED, WledStateSnapshot
 from daemon.audio_ctrl import (
     ALARM_FADEOUT_MS,
     AudioCtrl,
@@ -86,7 +94,9 @@ class ControlPanel:
     (daemon/checkins.py) speak before leaving for school; what is said
     comes from daemon/speech.py. The night-off (daemon/night.py) turns
     the lights off at 22:30 and keeps a status resync from re-lighting
-    them until 05:00.
+    them until 05:00. Other threads (the web API) change the panel only
+    through request(): a Command handled here by the Remote actions
+    (daemon/remote.py).
     """
 
     demo_on: bool = False
@@ -160,6 +170,13 @@ class ControlPanel:
             self.call_later,
             self._config,
         )
+        # Set by the playback monitor's PlaybackChanged events.
+        self._audio_playing = False
+        # Last WLED state read, when it was asked for, and the read job.
+        self._wled_snapshot: WledStateSnapshot | None = None
+        self._wled_snapshot_at: float = 0.0
+        self._wled_snapshot_job: Future | None = None
+        self.remote = Remote(self)
 
     def _new_morning(self, config: Config) -> MorningRoutine:
         return MorningRoutine(
@@ -173,6 +190,65 @@ class ControlPanel:
         """Queues an event for the main thread. Safe from any thread and
         from a signal handler."""
         self._events.put(event)
+
+    def request(self, name: str, **kwargs: Any) -> Future:
+        """Runs the Remote command `name` on the main thread. Safe from
+        any thread. The Future gets the command's result, or its
+        exception: KeyError for an unknown command, ValueError when the
+        panel refuses it."""
+        future: Future = Future()
+        self._events.put(Command(name, kwargs, future))
+        return future
+
+    def _run_command(self, cmd: Command) -> None:
+        if cmd.name not in Remote.READ_ONLY:
+            logger.info("remote: %s %s", cmd.name, cmd.kwargs)
+        try:
+            result = self.remote.command(cmd.name)(**cmd.kwargs)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning("remote: %s refused: %r", cmd.name, e)
+            cmd.future.set_exception(e)
+            return
+        except Exception as e:
+            logger.exception("remote: %s failed", cmd.name)
+            cmd.future.set_exception(e)
+            return
+        if isinstance(result, Future):
+            result.add_done_callback(lambda done: _pass_on(done, cmd.future))
+        else:
+            cmd.future.set_result(result)
+
+    def wled_snapshot(self) -> WledStateSnapshot | None:
+        """The last WLED state read, or None. When it is older than
+        config.wled_snapshot_max_age a fresh read is started on the WLED
+        lane; a later call gets it. Never blocks."""
+        age = time.monotonic() - self._wled_snapshot_at
+        if age > self._config.wled_snapshot_max_age and not self._is_running(
+            self._wled_snapshot_job
+        ):
+            requested_at = time.monotonic()
+
+            def store(snapshot: WledStateSnapshot) -> None:
+                self._wled_snapshot = snapshot
+                self._wled_snapshot_at = requested_at
+
+            self._wled_snapshot_job = self._run_job(
+                self._wled_jobs,
+                "wled-snapshot",
+                self.wled_instance.read_state,
+                on_done=store,
+                on_error=lambda _error: None,  # already logged; no sound
+            )
+        return self._wled_snapshot
+
+    @property
+    def wled_snapshot_at(self) -> float:
+        """time.monotonic() when the current snapshot was asked for."""
+        return self._wled_snapshot_at
+
+    def invalidate_wled_snapshot(self) -> None:
+        """After a WLED command: the next wled_snapshot() reads again."""
+        self._wled_snapshot_at = 0.0
 
     def _components(self) -> list[tuple[str, Component]]:
         """Components in start order. The job lanes come last so they
@@ -252,6 +328,8 @@ class ControlPanel:
             elif isinstance(event, NightTest):
                 logger.info("night test: lights off now")
                 self._night_off()
+            elif isinstance(event, Command):
+                self._run_command(event)
             else:
                 logger.warning("Unknown event %r", event)
         except Exception:
@@ -565,12 +643,14 @@ class ControlPanel:
                 send.extend(self._ctrls.set_all_nonindicatorleds(relay.state))
             self.send_packets(send)
 
-    def _night_off(self) -> None:
+    def _night_off(self, night_light: bool = True) -> None:
         """Lights off for the night, silently: every LED (and any running
         LED sequence), the backlight and the sockets in night_off_sockets;
         the strips go to the dim red night light unless the morning
         routine owns them. The bed lamp and the bed socket are left
-        alone. Not through cp_bg_lights()/_set_relays(): those play."""
+        alone. Not through cp_bg_lights()/_set_relays(): those play.
+        With night_light False the strips are not touched (Remote.all_off
+        turns them off itself)."""
         cfg = self._config
         self.demo_on = False
         packets = self._ctrls.set_all_leds(False)
@@ -582,6 +662,8 @@ class ControlPanel:
         for pin in cfg.night_off_sockets:
             packets.extend(self._ctrls.get_slavectrl(pin).set_state(False))
         self.send_packets(packets)
+        if not night_light:
+            return
         if self.morning.state in (
             MorningState.SUNRISE, MorningState.WAITING, MorningState.RINGING
         ):
@@ -877,6 +959,7 @@ class ControlPanel:
         self._audioctrl.play_bytes(audio, volume=volume)
 
     def speakerLeds(self, on: bool) -> None:
+        self._audio_playing = on
         if on:
             self.send_packets(Packet(HWEvent.BLINKFOREVER, BlinkTarget.SPEAKER_LEDS, 1))
         else:
@@ -1002,6 +1085,18 @@ class ControlPanel:
             logger.debug("SendQueue is now cleared.")
         else:
             logger.debug("SendQueue is empty. Good")
+
+
+def _pass_on(done: Future, target: Future) -> None:
+    """Copies a finished Future's outcome to target (from any thread)."""
+    if done.cancelled():
+        target.cancel()
+        return
+    error = done.exception()
+    if error is not None:
+        target.set_exception(error)
+    else:
+        target.set_result(done.result())
 
 
 class _MorningActions:

@@ -35,6 +35,18 @@ class PlaybackChanged:
 
 
 @dataclass(frozen=True)
+class Command:
+    """A request from another thread (the web API) to run one of the
+    Remote commands (daemon/remote.py) on the main thread. The command's
+    result or exception goes to future. A command may itself return a
+    Future (work on a job lane); its outcome is passed on when it ends."""
+
+    name: str
+    kwargs: dict
+    future: Future
+
+
+@dataclass(frozen=True)
 class JobDone:
     """A background job finished. on_done gets the job's result and
     on_error the exception; both run on the main thread."""

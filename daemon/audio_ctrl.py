@@ -152,17 +152,25 @@ class AudioCtrl:
         self._current_filepath = value
         self.rec_time = datetime.datetime.now()
 
-    def set_volume(self, volume: int) -> None:
+    def set_volume(self, volume: int, sound: bool = True) -> None:
         """Sets the volume for all sounds (the volume pot). While the
         volume override is on, it is only stored for afterwards.
 
         Args:
             volume (int): 0-100
+            sound (bool): play VOLUME_CHANGE. Off for the small steps a
+                dial sends many times a second.
         """
         volume = AudioCtrl.__clamp(volume, 0, 100)
         self.__master_volume = volume / 100
-        if self._override_volume is None:
+        if sound and self._override_volume is None:
             self.sysaudio_play(SysAudioEvent.VOLUME_CHANGE)
+
+    @property
+    def master_volume(self) -> int:
+        """The pot level in percent, whatever the sound switch and the
+        override say."""
+        return round(self.__master_volume * 100)
 
     def get_volume(self) -> float:
         """0.0-1.0. The pot level, 0 if the sound switch is off, or the
