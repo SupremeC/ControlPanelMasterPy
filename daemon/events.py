@@ -23,6 +23,11 @@ class MorningTest:
 
 
 @dataclass(frozen=True)
+class NightTest:
+    """Run the night-off now, whatever the time (SIGUSR2)."""
+
+
+@dataclass(frozen=True)
 class PlaybackChanged:
     """Audio playback started (True) or stopped (False)."""
 

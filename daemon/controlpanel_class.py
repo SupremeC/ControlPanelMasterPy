@@ -14,7 +14,7 @@ from typing import Any, Callable, List
 
 from .component import Component
 from .config import Config
-from .events import CalendarAlarm, JobDone, MorningTest, PlaybackChanged
+from .events import CalendarAlarm, JobDone, MorningTest, NightTest, PlaybackChanged
 from .workers import Workers
 from .wled import WLED  # WledStateSnapshot, SegmentState
 from daemon.audio_ctrl import (
@@ -30,6 +30,7 @@ from daemon.openaiWrapper import OpenAiWrapper
 from daemon.gCalender import TIMEZONE, Calender
 from daemon.morning import MorningRoutine, State as MorningState
 from daemon.checkins import Checkins
+from daemon.night import NightOff
 from daemon.speech import Speech, countdown_text, school_event
 from daemon import sunrise
 from daemon.weather_service import WeatherReport, WeatherService
@@ -83,7 +84,9 @@ class ControlPanel:
     sees every switch input first, even with the master switch off, so
     the alarm always rings and can always be dismissed. The check-ins
     (daemon/checkins.py) speak before leaving for school; what is said
-    comes from daemon/speech.py.
+    comes from daemon/speech.py. The night-off (daemon/night.py) turns
+    the lights off at 22:30 and keeps a status resync from re-lighting
+    them until 05:00.
     """
 
     demo_on: bool = False
@@ -151,6 +154,12 @@ class ControlPanel:
             self._config,
         )
         self._test_checkins: Checkins | None = None
+        self.night = NightOff(
+            _NightActions(self),
+            lambda: datetime.datetime.now(TIMEZONE),
+            self.call_later,
+            self._config,
+        )
 
     def _new_morning(self, config: Config) -> MorningRoutine:
         return MorningRoutine(
@@ -190,6 +199,7 @@ class ControlPanel:
         self.reset()
         self._real_morning.start()
         self.checkins.start()
+        self.night.start()
         self.call_later(WEATHER_FIRST_REFRESH, self._weather_refresh)
 
     def stop(self):
@@ -239,6 +249,9 @@ class ControlPanel:
                 self._real_morning.set_alarm(event.alarm)
             elif isinstance(event, MorningTest):
                 self.start_morning_test()
+            elif isinstance(event, NightTest):
+                logger.info("night test: lights off now")
+                self._night_off()
             else:
                 logger.warning("Unknown event %r", event)
         except Exception:
@@ -540,6 +553,34 @@ class ControlPanel:
                 )
                 send.extend(self._ctrls.set_all_nonindicatorleds(relay.state))
             self.send_packets(send)
+
+    def _night_off(self) -> None:
+        """Lights off for the night, silently: every LED (and any running
+        LED sequence), the backlight and the sockets in night_off_sockets;
+        the strips go to the dim red night light unless the morning
+        routine owns them. The bed lamp and the bed socket are left
+        alone. Not through cp_bg_lights()/_set_relays(): those play."""
+        cfg = self._config
+        self.demo_on = False
+        packets = self._ctrls.set_all_leds(False)
+        for target in BlinkTarget:
+            packets.append(Packet(HWEvent.BLINKFOREVER, target, 0))
+        relay = self._ctrls.get_ctrl_by_name("BacklightRelay")
+        relay.set_state(False)
+        packets.append(Packet(HWEvent.RELAY, relay.pin, 1))  # active-low
+        for pin in cfg.night_off_sockets:
+            packets.extend(self._ctrls.get_slavectrl(pin).set_state(False))
+        self.send_packets(packets)
+        if self.morning.state in (
+            MorningState.SUNRISE, MorningState.WAITING, MorningState.RINGING
+        ):
+            logger.info("night: the strips belong to the morning routine, left alone")
+            return
+        self.wled_instance.set_both(
+            cfg.night_strip_brightness,
+            cfg.night_strip_rgbw,
+            transition=cfg.night_strip_transition,
+        )
 
     def audio_volume(self, new_vol: int = None) -> None:
         """Clamps volume to 0-100, and sets master volume"""
@@ -991,6 +1032,16 @@ class _MorningActions:
 
     def briefing_play(self) -> None:
         self._cp._briefing_play()
+
+
+class _NightActions:
+    """NightOff's Actions (see daemon/night.py)."""
+
+    def __init__(self, cp: ControlPanel):
+        self._cp = cp
+
+    def lights_off(self) -> None:
+        self._cp._night_off()
 
 
 class _CheckinActions:

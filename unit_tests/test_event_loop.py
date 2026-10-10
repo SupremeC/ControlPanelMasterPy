@@ -18,10 +18,10 @@ import unittest.mock as mock
 from daemon.audio_ctrl import SysAudioEvent as aevent
 from daemon.cevent import CEvent
 from daemon.controlpanel_class import ControlPanel, EFFECT_BUTTONS
-from daemon.events import CalendarAlarm, MorningTest, PlaybackChanged
+from daemon.events import CalendarAlarm, MorningTest, NightTest, PlaybackChanged
 from daemon.gCalender import TIMEZONE
 from daemon.morning import State
-from daemon.packet import HWEvent, Packet
+from daemon.packet import BlinkTarget, HWEvent, Packet, PwmBoard
 
 
 def school_event(hour: int = 9, minute: int = 10) -> CEvent:
@@ -682,6 +682,70 @@ class TestCheckins(EventLoopTestCase):
             aevent.CHIME_SPEAK, block=True, volume=60
         )
         self.cp._audioctrl.play_bytes.assert_not_called()
+
+
+class TestNightOff(EventLoopTestCase):
+    """NightOff itself is tested in test_night.py; these check what the
+    panel does when it fires (or on SIGUSR2)."""
+
+    def relays(self, packets) -> list[tuple[int, int]]:
+        return [(p.target, p.val) for p in packets if p.hw_event == HWEvent.RELAY]
+
+    def assert_dark(self, packets) -> None:
+        relays = self.relays(packets)
+        self.assertIn((44, 1), relays, "backlight off")
+        self.assertIn((46, 1), relays, "drawer socket off")
+        self.assertEqual([], [r for r in relays if r[0] in (45, 47)], "bed lamp, bed socket untouched")
+        for board in (PwmBoard.I2CALED, PwmBoard.I2CBLED, PwmBoard.I2CCLED):
+            self.assertTrue(any(p.hw_event == board and p.val == 0 for p in packets), board)
+        stops = sorted(p.target for p in packets if p.hw_event == HWEvent.BLINKFOREVER and p.val == 0)
+        self.assertEqual(sorted(BlinkTarget), stops)
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
+
+    def test_lightsOff_silently_stripsLowRed(self):
+        # arrange
+        self.cp.demo_on = True
+
+        # act
+        self.cp._night_off()
+
+        # assert
+        self.assert_dark(self.sent_packets())
+        self.assertFalse(self.cp.demo_on)
+        self.assertFalse(self.cp._ctrls.get_ctrl_by_name("BacklightRelay").state)
+        self.assertFalse(self.cp._ctrls.get_slavectrl(68).state)
+        self.cp.wled_instance.set_both.assert_called_once_with(64, (255, 0, 34, 0), transition=5)
+        self.cp.wled_instance.set_wled_state.assert_not_called()
+
+    def test_whileTheMorningRoutineOwnsTheStrips_theyAreLeftAlone(self):
+        for state in (State.SUNRISE, State.WAITING, State.RINGING):
+            with self.subTest(state=state):
+                self.cp.wled_instance.set_both.reset_mock()
+                self.cp.morning.state = state
+
+                # act
+                self.cp._night_off()
+
+                # assert
+                self.assert_dark(self.sent_packets())
+                self.cp.wled_instance.set_both.assert_not_called()
+
+    def test_nightTestEvent_runsItNow(self):
+        # act
+        self.cp.post(NightTest())
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assert_dark(self.sent_packets())
+        self.cp.wled_instance.set_both.assert_called_once()
+
+    def test_wholeBurst_fitsInTheSendQueue(self):
+        # act
+        self.cp._night_off()
+
+        # assert
+        self.assertLess(self.cp._packet_sendqueue.qsize(), 200)
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
 
 
 if __name__ == "__main__":
