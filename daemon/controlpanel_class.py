@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable, List
 
 from .component import Component
+from .config import Config
 from .events import CalendarAlarm, JobDone, PlaybackChanged, SunriseDue
 from .workers import Workers
 from .wled import WLED  # WledStateSnapshot, SegmentState
@@ -29,13 +30,10 @@ logger = logging.getLogger("daemon.ctrlPanel")
 # 256 / 10bytes => 25 packets until buffer is full.
 # average arduino loop duration is ~25ms. In theory, that allows us
 # to send (1000/25ms)*25packets = 1000 packets per second.
-MAX_PACKETS_IN_SEND_QUEUE = 50
-SEND_HELLO_INTERVALL = 120  # seconds
-# A Mega with its own power supply keeps running when the USB cable is
-# unplugged, so a reconnect does not always produce a BOOTMEGA. If none
-# arrives this long after a (re)connect, ask the Mega for its status.
-# A rebooting Mega needs about 10 s before it sends BOOTMEGA.
-RESYNC_AFTER_CONNECT = 15  # seconds
+# The writer thread paces packets (one per 50 ms), which is what protects
+# the Mega's buffer. This queue is only the Pi-side backlog and must hold
+# a whole "all LEDs on/off" burst (57 packets).
+MAX_PACKETS_IN_SEND_QUEUE = 200
 MAX_EVENT_WAIT = 0.1  # seconds the main loop waits for an event
 DEMO_STEP_INTERVAL = 0.1  # seconds between LED toggles in demo mode
 BRIEFING_DELAY = 5  # seconds between stopping the alarm and the briefing
@@ -63,7 +61,8 @@ class ControlPanel:
 
     demo_on: bool = False
 
-    def __init__(self):
+    def __init__(self, config: Config | None = None):
+        self._config = config or Config()
         self._last_sent_hello: datetime.datetime = None
         self._last_received_hello: datetime.datetime = None
         self._synced_connection: float | None = None
@@ -71,13 +70,17 @@ class ControlPanel:
         self._packet_sendqueue: Queue = Queue(MAX_PACKETS_IN_SEND_QUEUE)
         self._events: Queue = Queue()
         self._pserial: PacketSerial = PacketSerial(
-            self._events, self._packet_sendqueue
+            self._events,
+            self._packet_sendqueue,
+            baudrate=self._config.mega_baud,
+            reconnect_interval=self._config.mega_reconnect_interval,
         )
         self._timers: list = []
         self._timer_seq = itertools.count()
         # One thread per lane, so jobs in a lane run in order.
         self._audio_jobs = Workers("audio-job")
         self._ai_jobs = Workers("ai-job")
+        self._wled_jobs = Workers("wled-job")
         self._effect_job: Future | None = None
         self._ai_job: Future | None = None
         self._demo_leds: list = []
@@ -90,12 +93,15 @@ class ControlPanel:
         self.cal = Calender(
             lambda: self._events.put(CalendarAlarm()),
             lambda minutes: self._events.put(SunriseDue(minutes)),
+            token_file=self._config.google_token_file,
+            client_secret_file=self._config.google_client_secret_file,
+            update_interval=self._config.calendar_update_interval,
         )
-        self.ai = OpenAiWrapper()
+        self.ai = OpenAiWrapper(key_path=self._config.openai_key_file)
         self._audioctrl: AudioCtrl = AudioCtrl(
             lambda playing: self._events.put(PlaybackChanged(playing))
         )
-        self.wled_instance = WLED()
+        self.wled_instance = WLED(self._config.wled_port, self._config.wled_baud)
 
     def _components(self) -> list[tuple[str, Component]]:
         """Components in start order. The job lanes come last so they
@@ -107,6 +113,7 @@ class ControlPanel:
             ("calendar", self.cal),
             ("audio jobs", self._audio_jobs),
             ("ai jobs", self._ai_jobs),
+            ("wled jobs", self._wled_jobs),
         ]
 
     def start(self):
@@ -236,11 +243,11 @@ class ControlPanel:
 
     def _resync_if_needed(self) -> None:
         """Requests the Mega's status once per connection if no BOOTMEGA
-        arrived within RESYNC_AFTER_CONNECT seconds of connecting."""
+        arrived within config.resync_after_connect seconds of connecting."""
         connected_at = self._pserial.connected_at
         if connected_at is None or connected_at == self._synced_connection:
             return
-        if time.monotonic() - connected_at < RESYNC_AFTER_CONNECT:
+        if time.monotonic() - connected_at < self._config.resync_after_connect:
             return
         self._synced_connection = connected_at
         logger.info("No BOOTMEGA since the Mega connected. Requesting status")
@@ -280,7 +287,13 @@ class ControlPanel:
                     self._audioctrl.sysaudio_play(aevent.SYSTEM_ON)
                 else:
                     p_tosend.extend(self._ctrls.set_all_leds(False))
-                    self.wled_instance.set_wled_state(False)
+                    # Reads WLED's state first (up to 1.5 s): not on the main thread.
+                    self._run_job(
+                        self._wled_jobs,
+                        "wled-off",
+                        self.wled_instance.set_wled_state,
+                        False,
+                    )
                     self._audioctrl.sysaudio_play(aevent.SYSTEM_OFF)
                     self.send_packets(p_tosend)
                     return
@@ -560,12 +573,20 @@ class ControlPanel:
             if packet.val == 100:
                 self.wled_instance._change_effect(0, segmentId)
                 return
-            segment_state = (
-                self.wled_instance.read_state().seg_state[segmentId].seg_state
-            )
             led_ctrl = self._ctrls.get_ctrl(packet.target)
-            self.send_packets(led_ctrl.set_state(not segment_state))
-            self.wled_instance.toggle_wled_state(segmentId)
+
+            def toggle(state) -> None:
+                segment_on = state.seg_state[segmentId].seg_state
+                self.send_packets(led_ctrl.set_state(not segment_on))
+                self.wled_instance.toggle_wled_state(segmentId)
+
+            # read_state() waits up to 1.5 s for WLED: not on the main thread.
+            self._run_job(
+                self._wled_jobs,
+                "wled-state",
+                self.wled_instance.read_state,
+                on_done=toggle,
+            )
             return
 
         if packet.target in [34, 36]:
@@ -619,7 +640,7 @@ class ControlPanel:
         return (
             self._last_sent_hello is None
             or (datetime.datetime.now() - self._last_sent_hello).total_seconds()
-            > SEND_HELLO_INTERVALL
+            > self._config.hello_interval
         )
 
     def reset(self):

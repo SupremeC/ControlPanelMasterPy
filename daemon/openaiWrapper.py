@@ -5,7 +5,7 @@ from pathlib import Path
 from openai import OpenAI
 from .cevent import CEvent
 from .smhi import SMHI
-from .global_variables import root_path
+from .config import Config
 
 
 logger = logging.getLogger("daemon.openaiWrapper")
@@ -13,7 +13,6 @@ logger = logging.getLogger("daemon.openaiWrapper")
 # gpt-4o-audio-preview was retired (404 model_not_found since Sep 2026).
 # gpt-audio-1.5 is OpenAI's named successor for the gpt-4o-audio / gpt-audio line.
 OPENAI_AUDIO_MODEL = "gpt-audio-1.5"
-DEFAULT_KEY_PATH = root_path / "daemon" / "cpanel-openai-service-account.secretkey"
 
 
 class OpenAiWrapper:
@@ -29,7 +28,7 @@ class OpenAiWrapper:
     audio: bytes | None
     """Raw audio data from last call."""
 
-    def __init__(self, key_path: Path = DEFAULT_KEY_PATH):
+    def __init__(self, key_path: Path = Config.openai_key_file):
         self._key_path = key_path
         self._client: OpenAI | None = None
         self.audio: bytes = None

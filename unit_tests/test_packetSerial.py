@@ -306,6 +306,20 @@ class Test_PacketSerial(unittest.TestCase):
         p = self._packet_sendqueue.get_nowait()
         self.assertEqual(p.hw_event, HWEvent.HELLO)
 
+    def test_send_hello_queueFull_doesNotBlock(self, mock_comports):
+        # arrange
+        ps = self._make(mock_comports)
+        while not self._packet_sendqueue.full():
+            self._packet_sendqueue.put(Packet(HWEvent.LED, 1, 1))
+
+        # act
+        started = time.monotonic()
+        with self.assertLogs("daemon.PacketSerial", "WARNING"):
+            ps.send_hello()
+
+        # assert
+        self.assertLess(time.monotonic() - started, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

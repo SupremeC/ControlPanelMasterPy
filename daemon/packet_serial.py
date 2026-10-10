@@ -54,7 +54,15 @@ class PacketSerial:
     RECONNECT_INTERVAL = 5  # seconds
     READ_TIMEOUT = 1  # seconds, so read_until() never blocks forever
 
-    def __init__(self, rqueue: Queue, squeue: Queue):
+    def __init__(
+        self,
+        rqueue: Queue,
+        squeue: Queue,
+        baudrate: int = BAUDRATE,
+        reconnect_interval: float = RECONNECT_INTERVAL,
+    ):
+        self.BAUDRATE = baudrate
+        self.RECONNECT_INTERVAL = reconnect_interval
         self._port = None
         self._ser = None
         self._received_queue = rqueue
@@ -170,15 +178,12 @@ class PacketSerial:
         is established.
         """
         try:
-            packet = Packet(HWEvent.HELLO, 1, 1)
-            self._send_queue.put(packet, block=True, timeout=10)
-        except (Full, ValueError) as e:
-            logger.error("ah crap. QueueSize=%d", self._send_queue.qsize())
-            d = self._send_queue.queue
-            for a in d:
-                logger.debug(a)
-            logger.error("ah crap. QueueSize=%d", self._send_queue.qsize())
-            logger.error(e)
+            self._send_queue.put_nowait(Packet(HWEvent.HELLO, 1, 1))
+        except Full:
+            # Never block the main loop; the next hello comes soon enough.
+            logger.warning(
+                "Send queue full (%d packets). Skipped HELLO", self._send_queue.qsize()
+            )
 
     def _start_read_packets(self) -> None:
         """Keeps the connection open and monitors it for new data.

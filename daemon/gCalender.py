@@ -1,7 +1,7 @@
 import datetime
 import threading
 import logging
-import os.path
+from pathlib import Path
 from typing import Callable, List
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -11,18 +11,26 @@ from googleapiclient.errors import HttpError
 import pytz
 
 from daemon.cevent import CEvent
+from daemon.config import Config
 
 
 logger = logging.getLogger("daemon.gCalender")
 
 
 class Calender:
-    UPDATE_INTERVAL = 60  # seconds
     THREAD_JOIN_TIMEOUT = 2  # seconds
 
     def __init__(
-        self, p_callback_alarm: Callable[[], None], p_callback_sr: Callable[[int], None]
+        self,
+        p_callback_alarm: Callable[[], None],
+        p_callback_sr: Callable[[int], None],
+        token_file: Path = Config.google_token_file,
+        client_secret_file: Path = Config.google_client_secret_file,
+        update_interval: float = Config.calendar_update_interval,
     ):
+        self._token_file = token_file
+        self._client_secret_file = client_secret_file
+        self.UPDATE_INTERVAL = update_interval
         # If modifying these scopes, delete the file token.json.
         self.SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
         self.creds = None
@@ -91,6 +99,7 @@ class Calender:
                     if current_time > self.alarm.start - datetime.timedelta(
                         minutes=self.alarm.reminder
                     ):
+                        self.alarm.reminder_done = True
                         self.on_sunrise(self.alarm.reminder)
                 if self.alarm is not None and self.alarm.has_time:
                     if current_time > self.alarm.start:
@@ -175,11 +184,9 @@ class Calender:
         # The file token.json stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        folder = "daemon/"
-
-        if os.path.exists("daemon/token.json"):
+        if self._token_file.exists():
             self.creds = Credentials.from_authorized_user_file(
-                folder + "token.json", self.SCOPES
+                str(self._token_file), self.SCOPES
             )
         # If there are no (valid) credentials available, let the user log in.
         if not self.creds or not self.creds.valid:
@@ -189,14 +196,12 @@ class Calender:
                 self.creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    folder
-                    + "/client_secret_776060522090-prfipc44cc0ef87rr78rg5773an22uan.apps.googleusercontent.com.json",
-                    self.SCOPES,
+                    str(self._client_secret_file), self.SCOPES
                 )
-                logger.warn("User input needed to refresh tokens")
+                logger.warning("User input needed to refresh tokens")
                 self.creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open(folder + "token.json", "w") as token:
+            with open(self._token_file, "w") as token:
                 token.write(self.creds.to_json())
 
     def parse_event_date(date_as_str: str) -> tuple[datetime.datetime, bool]:

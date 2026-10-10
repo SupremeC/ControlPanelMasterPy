@@ -28,10 +28,9 @@ class EventLoopTestCase(unittest.TestCase):
         cp.wled_instance = mock.Mock()
         cp.ai = mock.Mock()
         cp.cal = mock.Mock()
-        cp._audio_jobs.start()
-        cp._ai_jobs.start()
-        self.addCleanup(cp._audio_jobs.stop)
-        self.addCleanup(cp._ai_jobs.stop)
+        for lane in (cp._audio_jobs, cp._ai_jobs, cp._wled_jobs):
+            lane.start()
+            self.addCleanup(lane.stop)
         self.cp = cp
 
     def process_until(self, predicate, timeout: float = 2.0) -> bool:
@@ -319,6 +318,63 @@ class TestDemoAndBedLamp(EventLoopTestCase):
         self.assertEqual(1, len(self.cp._timers))
         self.assertTrue(self.process_until(lambda: not self.cp._timers, timeout=1))
         self.assertFalse(lamp.state)
+
+
+class TestSendQueue(EventLoopTestCase):
+    def test_allLedsBurst_fitsInSendQueue(self):
+        # arrange
+        burst = self.cp._ctrls.set_all_leds(False)
+
+        # act
+        self.cp.send_packets(burst)
+
+        # assert
+        self.assertEqual(len(burst), self.cp._packet_sendqueue.qsize())
+        self.cp._audioctrl.sysaudio_play.assert_not_called()
+
+
+class TestWledButtons(EventLoopTestCase):
+    def test_ledstripOnOff_readsStateOffTheMainThread(self):
+        # arrange
+        self.panel_on()
+        main = threading.current_thread()
+        reader = []
+        state = mock.Mock()
+        state.seg_state = [mock.Mock(seg_state=False)]
+
+        def read_state():
+            reader.append(threading.current_thread())
+            return state
+
+        self.cp.wled_instance.read_state.side_effect = read_state
+
+        # act
+        self.cp._events.put(Packet(HWEvent.SWITCH, 32, 1))
+        self.cp.process(max_wait=0)
+
+        # assert: the button is handled at once, the toggle follows the read
+        self.assertTrue(
+            self.process_until(lambda: self.cp.wled_instance.toggle_wled_state.called)
+        )
+        self.assertNotEqual(main, reader[0])
+        self.cp.wled_instance.toggle_wled_state.assert_called_once_with(0)
+
+    def test_masterOff_turnsWledOffOnTheLane(self):
+        # arrange
+        self.panel_on()
+
+        # act
+        started = time.monotonic()
+        self.cp._events.put(Packet(HWEvent.SWITCH, 12, 0))
+        self.cp.process(max_wait=0)
+
+        # assert
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.SYSTEM_OFF)
+        self.assertTrue(
+            self.process_until(lambda: self.cp.wled_instance.set_wled_state.called)
+        )
+        self.cp.wled_instance.set_wled_state.assert_called_once_with(False)
 
 
 if __name__ == "__main__":

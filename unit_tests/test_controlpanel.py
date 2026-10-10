@@ -9,17 +9,15 @@ import unittest
 import unittest.mock as mock
 from datetime import datetime, timedelta
 
-from daemon.controlpanel_class import (
-    ControlPanel,
-    RESYNC_AFTER_CONNECT,
-    SEND_HELLO_INTERVALL,
-)
+from daemon.config import Config
+from daemon.controlpanel_class import ControlPanel
 from daemon.packet import HWEvent, Packet
 
 
 def _bare_controlpanel() -> ControlPanel:
     """Create a ControlPanel instance without running __init__."""
     cp = ControlPanel.__new__(ControlPanel)
+    cp._config = Config()
     cp._last_sent_hello = None
     return cp
 
@@ -50,7 +48,7 @@ class TestTimeToSendHello(unittest.TestCase):
         # arrange
         cp = _bare_controlpanel()
         cp._last_sent_hello = datetime.now() - timedelta(
-            seconds=SEND_HELLO_INTERVALL + 1
+            seconds=Config.hello_interval + 1
         )
 
         # act
@@ -63,6 +61,7 @@ class TestTimeToSendHello(unittest.TestCase):
 class TestResyncAfterConnect(unittest.TestCase):
     def _make(self, connected_ago: float | None) -> ControlPanel:
         cp = ControlPanel.__new__(ControlPanel)
+        cp._config = Config()
         cp._synced_connection = None
         cp._pserial = mock.Mock()
         cp._pserial.connected_at = (
@@ -93,7 +92,7 @@ class TestResyncAfterConnect(unittest.TestCase):
 
     def test_noBootMegaAfterConnect_resetsOnce(self):
         # arrange
-        cp = self._make(connected_ago=RESYNC_AFTER_CONNECT + 1)
+        cp = self._make(connected_ago=Config.resync_after_connect + 1)
 
         # act
         cp._resync_if_needed()
@@ -104,7 +103,7 @@ class TestResyncAfterConnect(unittest.TestCase):
 
     def test_bootMegaReceived_noExtraReset(self):
         # arrange
-        cp = self._make(connected_ago=RESYNC_AFTER_CONNECT + 1)
+        cp = self._make(connected_ago=Config.resync_after_connect + 1)
         cp._ControlPanel__act(Packet(HWEvent.BOOTMEGA, 0, 1))
         cp.reset.reset_mock()
 
@@ -116,9 +115,9 @@ class TestResyncAfterConnect(unittest.TestCase):
 
     def test_reconnectAfterSync_resetsAgain(self):
         # arrange
-        cp = self._make(connected_ago=RESYNC_AFTER_CONNECT + 1)
+        cp = self._make(connected_ago=Config.resync_after_connect + 1)
         cp._resync_if_needed()
-        cp._pserial.connected_at = time.monotonic() - RESYNC_AFTER_CONNECT - 1
+        cp._pserial.connected_at = time.monotonic() - Config.resync_after_connect - 1
 
         # act
         cp._resync_if_needed()
