@@ -57,6 +57,20 @@ foo@bar$ sudo systemctl restart service_cp
 foo@bar$ journalctl -u service_cp -f
 ```
 
+#### Sound files:
+System sounds are WAV files in `daemon/systemsounds/`, named after the
+`SysAudioEvent` they belong to (e.g. `failed.wav`). They are not in git.
+The morning routine's `alarm_soft.wav`, `chime_off.wav` and
+`chime_speak.wav` are made with `bin/python tools/make_sounds.py`; replace
+any of them with your own WAV (48 kHz mono, the alarm loopable) and
+restart the daemon.
+
+#### Tools:
+Run on the Pi from the repo root with the daemon stopped (they use the
+LED strips or the speaker themselves):
++ `tools/sunrise_demo.py`: plays or holds the sunrise on the LED strips
++ `tools/alarm_demo.py`: plays the alarm ramp and the chimes
+
 
 ## POI
 If you want to fork this repo and customize it, pay special attention to these two code files

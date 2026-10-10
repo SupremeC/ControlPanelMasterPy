@@ -65,6 +65,12 @@ class Config:
     )
     sunrise_end_rgbw: tuple[int, int, int, int] = (255, 140, 40, 255)  # warm white
     sunrise_white_at: float = 0.7  # share of the sunrise until warm white
+    # Alarm sound, in percent of full software volume. The amp knob is
+    # fixed, so this is the whole volume chain. The alarm ignores the pot
+    # and the sound switch; it starts quiet and ramps up.
+    alarm_volume: int = 70
+    alarm_start_volume: int = 10
+    alarm_ramp_seconds: float = 90
     # An alarm missed by up to this much (daemon restart) still rings.
     late_start_grace_minutes: int = 15
 

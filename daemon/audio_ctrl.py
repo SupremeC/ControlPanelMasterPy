@@ -15,9 +15,24 @@ from enum import unique, IntEnum
 from pygame import mixer
 from daemon.audio_rec import AudioRec
 from daemon.audio_effects import AudioEffect, EffectType
+from daemon.config import Config
 import daemon.global_variables
 
 logger = logging.getLogger("daemon.audioCtrl")
+
+REC_CHANNEL = 0
+ALARM_CHANNEL = 1  # reserved, so system sounds never cut the alarm off
+ALARM_FADEOUT_MS = 500
+
+
+def alarm_ramp_level(elapsed: float, seconds: float, start: int, end: int) -> int:
+    """Alarm level (percent) `elapsed` seconds into a ramp from start to
+    end. The level rises by the same factor every second, which sounds
+    like an even rise; a straight line would jump at first, then stall."""
+    if seconds <= 0 or elapsed >= seconds:
+        return end
+    t = max(elapsed, 0) / seconds
+    return round(start * (end / start) ** t)
 
 
 @unique
@@ -48,6 +63,9 @@ class SysAudioEvent(IntEnum):
     FLIP_SWITCH = 90
     DEMOMODE = 100
     ALARM = 120
+    ALARM_SOFT = 121
+    CHIME_OFF = 122
+    CHIME_SPEAK = 123
     FAILED = 200
     TICK = 254
 
@@ -88,6 +106,9 @@ class AudioCtrl:
         self.rec_time = None
         self._current_filepath = None
         self.alarm_sound: mixer.Sound | None = None
+        self.alarm_channel: mixer.Channel | None = None
+        # Set while the morning routine holds the volume (0.0-1.0).
+        self._override_volume: float | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -99,8 +120,9 @@ class AudioCtrl:
         # init() 'channels' refers to mono vs stereo, not playback Channel object
         mixer.init(48000, -16, channels=1, buffer=1024)
         mixer.set_num_channels(6)
-        mixer.set_reserved(1)
-        self.rec_channel = mixer.Channel(0)
+        mixer.set_reserved(2)
+        self.rec_channel = mixer.Channel(REC_CHANNEL)
+        self.alarm_channel = mixer.Channel(ALARM_CHANNEL)
         audioclipsfound = self.__load_sound_library(self.__systemsoundsdir)
         self.enable_sound(True)
         self.set_volume(50)  # 0-100
@@ -142,25 +164,40 @@ class AudioCtrl:
         self.rec_time = datetime.datetime.now()
 
     def set_volume(self, volume: int) -> None:
-        """Sets the volume for all sounds
+        """Sets the volume for all sounds (the volume pot). While the
+        volume override is on, it is only stored for afterwards.
 
         Args:
             volume (int): 0-100
         """
         volume = AudioCtrl.__clamp(volume, 0, 100)
         self.__master_volume = volume / 100
-        self.sysaudio_play(SysAudioEvent.VOLUME_CHANGE)
+        if self._override_volume is None:
+            self.sysaudio_play(SysAudioEvent.VOLUME_CHANGE)
 
-    def get_volume(self) -> int:
+    def get_volume(self) -> float:
+        """0.0-1.0. The pot level, 0 if the sound switch is off, or the
+        override level while the override is on."""
+        if self._override_volume is not None:
+            return self._override_volume
         return self.__master_volume if self.__sound_on else 0
+
+    def volume_override(self, on: bool, level: int = Config.alarm_volume) -> None:
+        """On: every sound plays at level (percent), whatever the pot and
+        the sound switch say. Off: the pot and switch apply again,
+        including changes made while the override was on."""
+        self._override_volume = AudioCtrl.__clamp(level, 0, 100) / 100 if on else None
+        logger.info(
+            "Volume override %s", f"on at {level} %" if on else "off"
+        )
 
     def enable_sound(self, on: bool) -> None:
         self.__sound_on = on
 
     def recsaved_play(self, pin: int = None) -> None:
-        if not self.__sound_on:
-            return
         """Plays sound linked to pinNr"""
+        if self.get_volume() <= 0:
+            return
         if pin is None:
             logger.warning("No pinNr provided to AudioCtrl.recsaved_play(). NOOP")
             return
@@ -187,9 +224,13 @@ class AudioCtrl:
     def play_bytes(self, p_bytes: bytes) -> None:
         """Blocking: plays MP3 data with ffplay until it ends. ffplay is what
         pydub used here too, but pydub let it print its progress to the
-        journal."""
+        journal. Full volume, except at the override level while the
+        override is on."""
+        cmd = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error"]
+        if self._override_volume is not None:
+            cmd += ["-volume", str(round(self._override_volume * 100))]
         subprocess.run(
-            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", "-i", "pipe:0"],
+            cmd + ["-i", "pipe:0"],
             input=p_bytes,
             stdout=subprocess.DEVNULL,
             check=True,
@@ -200,6 +241,34 @@ class AudioCtrl:
             self.alarm_sound.stop()
             self.alarm_sound = None
 
+    def alarm_start(self, level: int) -> None:
+        """Loops the alarm sound on its own channel at level (percent),
+        whatever the pot, the sound switch and the override say.
+        Uses alarm.wav if alarm_soft.wav is missing."""
+        name = next((n for n in ("alarm_soft", "alarm") if n in self.systemsounds), None)
+        if name is None:
+            logger.error("No alarm sound in %s", self.__systemsoundsdir)
+            return
+        if name != "alarm_soft":
+            logger.warning("alarm_soft.wav missing, using %s.wav", name)
+        sound = mixer.Sound(self.systemsounds[name])
+        self.alarm_channel.play(sound, loops=-1)
+        # play() resets the channel volume, so set it afterwards.
+        self.alarm_channel.set_volume(AudioCtrl.__clamp(level, 0, 100) / 100)
+
+    def alarm_set_level(self, level: int) -> None:
+        """Changes the level (percent) of the playing alarm."""
+        if self.alarm_channel is not None:
+            self.alarm_channel.set_volume(AudioCtrl.__clamp(level, 0, 100) / 100)
+
+    def alarm_stop(self) -> None:
+        """Fades the alarm out. Safe when it is not playing."""
+        if self.alarm_channel is not None:
+            self.alarm_channel.fadeout(ALARM_FADEOUT_MS)
+
+    def alarm_playing(self) -> bool:
+        return self.alarm_channel is not None and bool(self.alarm_channel.get_busy())
+
     def sysaudio_play(
         self,
         event: SysAudioEvent = SysAudioEvent.NONE_,
@@ -207,7 +276,7 @@ class AudioCtrl:
         repeat: int = 0,
     ) -> None:
         """PLays built-in sound. See folder 'systemsounds'"""
-        if not self.__sound_on:
+        if self.get_volume() <= 0:
             return
         if event is None or event == SysAudioEvent.NONE_:
             return
