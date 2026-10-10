@@ -118,6 +118,10 @@ class Config:
     tts_model: str = "gpt-4o-mini-tts"
     voice: str = "alloy"
     humour_style: str = "torr"
+    # Silence in spoken texts: around the wake line's joke, and at a
+    # free-standing dash (before a joke's punchline).
+    speech_pause_seconds: float = 1.2
+    speech_dash_pause_seconds: float = 1.0
     # Fixed texts (countdown) are synthesised once and kept here.
     speech_cache_dir: Path = DAEMON_DIR / "speech_cache"
     # Hand-rated wake-up jokes (daemon/jokes.py) and when each was told.

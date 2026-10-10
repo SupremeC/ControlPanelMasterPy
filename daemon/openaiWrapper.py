@@ -69,16 +69,18 @@ class OpenAiWrapper:
             raise ValueError(f"not a JSON object: {reply!r}")
         return reply
 
-    def speak(self, text: str, instructions: str = SPEAK_INSTRUCTIONS) -> bytes:
-        """Reads a text aloud (MP3), stores it in self.audio and returns
-        it. Blocking."""
+    def speak(
+        self, text: str, instructions: str = SPEAK_INSTRUCTIONS, response_format: str = "mp3"
+    ) -> bytes:
+        """Reads a text aloud (MP3, or "pcm": raw 24 kHz 16-bit mono),
+        stores it in self.audio and returns it. Blocking."""
         self.audio = None
         response = self.client.audio.speech.create(
             model=self._cfg.tts_model,
             voice=self._cfg.voice,
             input=text,
             instructions=instructions,
-            response_format="mp3",
+            response_format=response_format,
         )
         self.audio = response.read()
         return self.audio

@@ -21,10 +21,12 @@ from collections import deque
 from dataclasses import dataclass
 import datetime
 import hashlib
+import io
 import logging
 import os
 from pathlib import Path
 import re
+import wave
 
 from daemon import agenda
 from daemon.agenda import Item, Kind
@@ -182,14 +184,32 @@ def looks_swedish(text: str) -> bool:
     return (swedish > 0 or has_letters) and foreign * 3 <= swedish
 
 
+PCM_RATE = 24000  # OpenAI text-to-speech "pcm": 24 kHz, 16-bit, mono
+PAUSE = "‖"  # a pause of speech_pause_seconds in a text to speak
+# A free-standing dash ('? – Navigator.') is a pause of
+# speech_dash_pause_seconds, not a word. Hyphens inside words stay.
 _PAUSE_DASH = re.compile(r"\s*(?:[–—]|(?<=\s)-(?=\s))\s*")
 
 
+def segments(text: str, pause: float, dash_pause: float) -> list[tuple[str, float]]:
+    """(text, silence after it in seconds) for each part of a text: split
+    at PAUSE marks and at free-standing dashes. The last part has none."""
+    out: list[tuple[str, float]] = []
+    for chunk in text.split(PAUSE):
+        parts = [p.strip() for p in _PAUSE_DASH.split(chunk)]
+        parts = [p for p in parts if p]
+        out += [(p, dash_pause) for p in parts[:-1]]
+        if parts:
+            out.append((parts[-1], pause))
+    if out:
+        out[-1] = (out[-1][0], 0.0)
+    return out
+
+
 def spoken(text: str) -> str:
-    """The text as it is sent to text-to-speech: a free-standing dash
-    ('? – Navigator.') is a pause, not a word. Hyphens inside words
-    ('t-shirt', 'Sov-jet') stay."""
-    return _PAUSE_DASH.sub("... ", text).strip()
+    """One text as it is sent to text-to-speech in one piece: pauses
+    become '...'."""
+    return _PAUSE_DASH.sub("... ", text.replace(PAUSE, "...")).strip()
 
 
 def countdown_text(minutes: int) -> str:
@@ -295,27 +315,24 @@ class Speech:
         style: Style | None = None,
         joke: str | None = None,
     ) -> str:
-        """'God morgon, Kim. Tisdag. <joke> Kläderna på – tjocktröja idag – sen frukost.'
-        Without `joke` the text model writes one."""
+        """'God morgon, Kim. Tisdag. ‖ <joke> ‖ Kläderna på, tjocktröja, sen
+        frukost.' (‖ is a pause.) Without `joke` the text model writes one."""
         name = self.personal().name
         lines = self._wake_lines(
             now.date(), weather_facts, school_day, style or self.style(), want_joke=joke is None
         )
         if joke is not None:
             lines = AiLines(joke=joke, clothes_short=lines.clothes_short)
-        parts = [
-            f"God morgon{', ' + name if name else ''}.",
-            f"{WEEKDAYS[now.weekday()].capitalize()}.",
-        ]
+        parts = [f"God morgon{', ' + name if name else ''}. {WEEKDAYS[now.weekday()].capitalize()}."]
         if lines.joke:
             parts.append(_sentence(lines.joke))
             self._recent_jokes.append(lines.joke)
         if lines.clothes_short:
             short = lines.clothes_short.rstrip(".!")
-            parts.append(f"Kläderna på – {short[:1].lower()}{short[1:]} – sen frukost.")
+            parts.append(f"Kläderna på, {short[:1].lower()}{short[1:]}, sen frukost.")
         else:
             parts.append("Kläderna på, sen frukost.")
-        return " ".join(parts)
+        return f" {PAUSE} ".join(parts)
 
     def overview_text(
         self,
@@ -462,7 +479,19 @@ class Speech:
     def say(self, text: str, instructions: str = VOICE_PLAIN) -> bytes:
         """Text-to-speech, MP3. Blocking; raises on failure."""
         logger.info("Speaking: %s", text)
-        return self._ai.speak(spoken(text), instructions)
+        parts = segments(
+            text, self._cfg.speech_pause_seconds, self._cfg.speech_dash_pause_seconds
+        )
+        if len(parts) <= 1:
+            return self._ai.speak(spoken(text), instructions)
+        # One request per part, joined with real silence: the voice's own
+        # pauses (for '...') are too short to follow a joke half asleep.
+        pcm = bytearray()
+        for part, silence in parts:
+            chunk = self._ai.speak(part, instructions, response_format="pcm")
+            pcm += chunk[: len(chunk) // 2 * 2]
+            pcm += bytes(round(PCM_RATE * silence) * 2)
+        return _wav(bytes(pcm))
 
     def wake_voice(self, style: Style | None = None) -> str:
         return f"{VOICE_BASE} {(style or self.style()).voice}"
@@ -485,6 +514,17 @@ class Speech:
         os.replace(tmp, path)
         logger.info("Cached speech %s: %s", path.name, text)
         return audio
+
+
+def _wav(pcm: bytes) -> bytes:
+    """OpenAI's raw PCM (24 kHz, 16-bit, mono) as a WAV file."""
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(PCM_RATE)
+        w.writeframes(pcm)
+    return out.getvalue()
 
 
 def _check(reply: dict, fields: dict[str, int]) -> dict | None:

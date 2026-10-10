@@ -4,11 +4,13 @@ the speech cache. The OpenAI wrapper is a mock."""
 
 import dataclasses
 import datetime
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 import unittest.mock as mock
+import wave
 
 from daemon.cevent import CEvent
 from daemon.config import Config
@@ -20,6 +22,7 @@ from daemon.speech import (
     join_sv,
     looks_swedish,
     school_event,
+    segments,
     spoken,
 )
 
@@ -122,8 +125,8 @@ class TestWakeLine(SpeechTestCase):
 
         # assert
         self.assertEqual(
-            "God morgon, Kim. Tisdag. Kudden har begärt semester. "
-            "Kläderna på – långbyxor och tröja – sen frukost.",
+            "God morgon, Kim. Tisdag. ‖ Kudden har begärt semester. ‖ "
+            "Kläderna på, långbyxor och tröja, sen frukost.",
             text,
         )
         system, user, effort = self.ai.chat_json.call_args.args
@@ -136,7 +139,7 @@ class TestWakeLine(SpeechTestCase):
     def test_noWeather_noClothesHint(self):
         self.ai.chat_json.return_value = {"skamt": "Nu kör vi", "klader_kort": "t-shirt"}
         text = self.speech.wake_text(at("2026-10-13 06:45"))
-        self.assertTrue(text.endswith("Nu kör vi. Kläderna på, sen frukost."))
+        self.assertTrue(text.endswith("Nu kör vi. ‖ Kläderna på, sen frukost."))
         self.assertIn("Väder: saknas.", self.ai.chat_json.call_args.args[1])
 
     def test_modelFails_templateWithoutJoke(self):
@@ -148,7 +151,7 @@ class TestWakeLine(SpeechTestCase):
             text = self.speech.wake_text(at("2026-10-13 06:45"), "Väder")
 
         # assert: two tries
-        self.assertEqual("God morgon, Kim. Tisdag. Kläderna på, sen frukost.", text)
+        self.assertEqual("God morgon, Kim. Tisdag. ‖ Kläderna på, sen frukost.", text)
         self.assertEqual(2, self.ai.chat_json.call_count)
 
     def test_foreignReply_isRejectedThenRetried(self):
@@ -169,7 +172,7 @@ class TestWakeLine(SpeechTestCase):
         self.ai.chat_json.return_value = {"skamt": "och " * 50, "klader_kort": ""}
         with self.assertLogs("daemon.speech", "WARNING"):
             text = self.speech.wake_text(at("2026-10-13 06:45"))
-        self.assertEqual("God morgon, Kim. Tisdag. Kläderna på, sen frukost.", text)
+        self.assertEqual("God morgon, Kim. Tisdag. ‖ Kläderna på, sen frukost.", text)
 
     def test_recentJokes_areNotRepeated(self):
         self.ai.chat_json.return_value = {"skamt": "Sängen har gjort sitt", "klader_kort": ""}
@@ -191,8 +194,8 @@ class TestWakeLineFromPool(SpeechTestCase):
 
         # assert
         self.assertEqual(
-            "God morgon, Kim. Tisdag. Här ser vi tonåringen i sitt bo. "
-            "Kläderna på – långbyxor och tröja – sen frukost.",
+            "God morgon, Kim. Tisdag. ‖ Här ser vi tonåringen i sitt bo. ‖ "
+            "Kläderna på, långbyxor och tröja, sen frukost.",
             text,
         )
         self.assertIn("naturfilmsberättare", voice)
@@ -205,8 +208,41 @@ class TestWakeLineFromPool(SpeechTestCase):
             {"id": "j1", "style": "torr", "tags": [], "text": "Sängen har gjort sitt."},
         ]), encoding="utf-8")
         text, _ = self.speech.wake_line(at("2026-10-13 06:45"))
-        self.assertIn("Sängen har gjort sitt. Kläderna på, sen frukost.", text)
+        self.assertIn("Sängen har gjort sitt. ‖ Kläderna på, sen frukost.", text)
         self.ai.chat_json.assert_not_called()
+
+
+class TestPauses(SpeechTestCase):
+    def test_segments_pauseMarksAndDashes(self):
+        text = "God morgon. ‖ Vad sa väggen? – Vi ses vid hörnet. ‖ Kläderna på, sen frukost."
+        self.assertEqual(
+            [("God morgon.", 1.2), ("Vad sa väggen?", 1.0),
+             ("Vi ses vid hörnet.", 1.2), ("Kläderna på, sen frukost.", 0.0)],
+            segments(text, 1.2, 1.0),
+        )
+
+    def test_segments_hyphenInWordStays(self):
+        self.assertEqual([("Sov-jet!", 0.0)], segments("Sov-jet!", 1.2, 1.0))
+
+    def test_say_onePart_isMp3(self):
+        self.ai.speak.return_value = b"mp3"
+        self.assertEqual(b"mp3", self.speech.say("15 minuter kvar."))
+        self.assertEqual(("15 minuter kvar.", mock.ANY), self.ai.speak.call_args.args)
+
+    def test_say_parts_joinedWithSilence(self):
+        # arrange: 0.1 s of sound per part
+        self.ai.speak.return_value = b"\x01\x00" * 2400
+
+        # act
+        audio = self.speech.say("A. ‖ B? – C.")
+
+        # assert: three requests as pcm, a WAV of sound + silence
+        self.assertEqual(3, self.ai.speak.call_count)
+        self.assertEqual("pcm", self.ai.speak.call_args.kwargs["response_format"])
+        with wave.open(io.BytesIO(audio)) as w:
+            self.assertEqual(24000, w.getframerate())
+            seconds = w.getnframes() / w.getframerate()
+        self.assertAlmostEqual(0.3 + 1.2 + 1.0, seconds, places=3)
 
     def test_noPool_modelWritesTheJoke(self):
         self.ai.chat_json.return_value = {"skamt": "Frukosten väntar på dig", "klader_kort": ""}
