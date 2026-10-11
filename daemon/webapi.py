@@ -123,11 +123,14 @@ class ResponseHeaders:
 
     - Outside /api/: Cache-Control: no-cache, so a phone asks for app.js
       again on every load (the ETag makes that cheap).
-    - On /api/ (not the event stream): Connection: close. uvicorn drops
-      an idle keep-alive connection after a few seconds while a Windows
-      client keeps its end; the Stream Deck plugins then sent their next
-      request into a half-closed socket and waited forever, which froze
-      the key. One connection per request costs nothing on the LAN.
+    - On /api/: a warning line for every refused call (status >= 400) with
+      the method, path and client, since the Stream Deck plugins only
+      show a red or yellow key. Access logging is off.
+
+    Not `Connection: close` on API answers: API Monkey's Lua HTTP client
+    sends one request fine and fails on the next when the server closes
+    the connection after each answer. Idle connections are kept instead
+    (uvicorn timeout_keep_alive = config.web_keep_alive).
 
     A plain ASGI middleware, not Starlette's BaseHTTPMiddleware: that one
     runs the app in its own task and hides client disconnects from
@@ -141,21 +144,14 @@ class ResponseHeaders:
             await self.app(scope, receive, send)
             return
         path = scope["path"]
-        if path == "/api/events":
-            header = None
-        elif path.startswith("/api/"):
-            header = ("Connection", "close")
-        else:
-            header = ("Cache-Control", "no-cache")
-        if header is None:
-            await self.app(scope, receive, send)
-            return
+        api = path.startswith("/api/")
 
         async def send_with_header(message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message)[header[0]] = header[1]
+                if not api:
+                    MutableHeaders(scope=message)["Cache-Control"] = "no-cache"
                 status = message["status"]
-                if status >= 400 and path.startswith("/api/"):
+                if status >= 400 and api:
                     # A refused call, with who sent it: the Stream Deck
                     # plugins only show a red key. Access logging is off.
                     client = scope.get("client") or ("?", 0)
@@ -553,6 +549,7 @@ class WebApi:
             loop="asyncio",
             http="h11",
             lifespan="off",
+            timeout_keep_alive=self._cfg.web_keep_alive,
             log_config=None,  # the daemon's logging stays as it is
             log_level="warning",
             access_log=False,

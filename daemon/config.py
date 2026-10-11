@@ -137,6 +137,9 @@ class Config:
     web_port: int = 8080
     web_dir: Path = DAEMON_DIR / "web"  # the page; without it, a link to /docs
     web_command_timeout: float = 3  # seconds the HTTP thread waits for the main loop
+    # Idle HTTP connections are kept this long. uvicorn's own 5 s left
+    # Windows clients (the Stream Deck plugins) with half-closed sockets.
+    web_keep_alive: int = 600  # seconds
     # /api/events: while a page listens, the state is compared this often
     # and sent when it changed; a keep-alive comment goes out every ping.
     web_events_interval: float = 0.5  # seconds

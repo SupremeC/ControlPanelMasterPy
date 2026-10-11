@@ -253,8 +253,7 @@ class TestStaticPage(unittest.TestCase):
         self.assertEqual(200, client.get("/api/state").status_code)  # API first
         api_headers = client.get("/api/state").headers
         self.assertNotIn("cache-control", api_headers)
-        self.assertEqual("close", api_headers["connection"])  # one connection per request
-        self.assertNotIn("connection", script.headers)
+        self.assertNotIn("connection", api_headers)  # keep-alive: API Monkey needs it
         # A GET on a POST-only API route is 405 with a hint, not a 404 from the mount
         with self.assertLogs("daemon.web", "WARNING") as logs:
             refused = client.get("/api/sockets/bed/toggle")
