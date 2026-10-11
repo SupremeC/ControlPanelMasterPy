@@ -28,10 +28,11 @@ from typing import Annotated, Any, AsyncIterator, Callable, Literal
 
 import anyio
 from fastapi import FastAPI, File, Form, HTTPException, Path, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
+from starlette.routing import Match
 import uvicorn
 
 from daemon.config import Config
@@ -153,9 +154,36 @@ class ResponseHeaders:
         async def send_with_header(message) -> None:
             if message["type"] == "http.response.start":
                 MutableHeaders(scope=message)[header[0]] = header[1]
+                status = message["status"]
+                if status >= 400 and path.startswith("/api/"):
+                    # A refused call, with who sent it: the Stream Deck
+                    # plugins only show a red key. Access logging is off.
+                    client = scope.get("client") or ("?", 0)
+                    logger.warning(
+                        "web: %s %s -> %s from %s", scope["method"], path, status, client[0]
+                    )
             await send(message)
 
         await self.app(scope, receive, send_with_header)
+
+
+class PageFiles(StaticFiles):
+    """The page's files, mounted at /. A GET on an API path that exists
+    only for POST would otherwise fall through to this mount and get a
+    404; it answers 405 with a hint, as the API alone would."""
+
+    def __init__(self, routes, **kwargs):
+        super().__init__(**kwargs)
+        self._routes = routes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and scope["path"].startswith("/api/"):
+            partial = any(route.matches(scope)[0] == Match.PARTIAL for route in self._routes)
+            detail = "Fel metod: den här adressen tar POST" if partial else "Finns inte"
+            response = JSONResponse({"detail": detail}, status_code=405 if partial else 404)
+            await response(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
 
 
 class StateBroadcast:
@@ -492,7 +520,9 @@ def build_app(
     app.add_middleware(ResponseHeaders)
 
     if cfg.web_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(cfg.web_dir), html=True), name="web")
+        app.mount(
+            "/", PageFiles(app.router.routes, directory=str(cfg.web_dir), html=True), name="web"
+        )
     else:
 
         @app.get("/", include_in_schema=False, response_class=HTMLResponse)

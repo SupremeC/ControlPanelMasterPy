@@ -255,6 +255,13 @@ class TestStaticPage(unittest.TestCase):
         self.assertNotIn("cache-control", api_headers)
         self.assertEqual("close", api_headers["connection"])  # one connection per request
         self.assertNotIn("connection", script.headers)
+        # A GET on a POST-only API route is 405 with a hint, not a 404 from the mount
+        with self.assertLogs("daemon.web", "WARNING") as logs:
+            refused = client.get("/api/sockets/bed/toggle")
+        self.assertEqual(405, refused.status_code)
+        self.assertIn("POST", refused.json()["detail"])
+        self.assertIn("web: GET /api/sockets/bed/toggle -> 405", logs.output[0])
+        self.assertEqual(404, client.get("/api/nope").status_code)
 
 
 class TestPresetRoutes(unittest.TestCase):
