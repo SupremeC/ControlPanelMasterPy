@@ -100,6 +100,11 @@
   </div>
   <small class="hint">Ratten på panelen tar över nästa gång den vrids.</small>
   <small class="hint warn hidden" id="muted-hint">Ljudet är avstängt på panelen.</small>
+  <form class="row slider-row" id="say-form" autocomplete="off">
+    <input type="text" id="say-text" maxlength="200" placeholder="Säg något på panelen…" enterkeyhint="send">
+    <button class="btn" id="btn-say" type="submit">Säg</button>
+  </form>
+  <small class="hint">Rösten görs av OpenAI och kostar lite per gång. En i taget, vänta tio sekunder mellan.</small>
   <div class="grid" id="presets"></div>
   <details>
     <summary>Systemljud</summary>

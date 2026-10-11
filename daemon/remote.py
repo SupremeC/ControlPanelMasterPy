@@ -105,6 +105,9 @@ COMMANDS = frozenset(
         "set_preset_default",
         "restore_preset",
         "rename_preset",
+        "say",
+        "morning_test",
+        "night_test",
     }
 )
 
@@ -144,6 +147,7 @@ class Remote:
         self._brightness_pending: dict[int, int] = {}
         self._brightness_scheduled: set[int] = set()
         self._muted_volume: int | None = None
+        self._last_say: float | None = None
 
     def command(self, name: str) -> Callable[..., Any]:
         """The command's callable. KeyError for an unknown name."""
@@ -509,6 +513,43 @@ class Remote:
             self._send_brightness(segment, target)
         else:
             self._cp.invalidate_wled_snapshot()
+
+    # ---- speech and test triggers ------------------------------------------
+
+    def say(self, text: str) -> Future:
+        """Speaks the text on the panel: synthesis and playback on the AI
+        lane, the Future ends when it has been played. Refused while the
+        panel is muted and when called again within say_min_interval."""
+        cp = self._cp
+        cfg = cp._config
+        text = " ".join(str(text).split())
+        if not text or len(text) > cfg.say_max_chars:
+            raise ValueError(f"Texten måste vara 1-{cfg.say_max_chars} tecken")
+        if cp._audioctrl.get_volume() <= 0:
+            raise ValueError("Ljudet är avstängt på panelen")
+        now = time.monotonic()
+        if self._last_say is not None and now - self._last_say < cfg.say_min_interval:
+            raise ValueError("Vänta lite innan nästa")
+        self._last_say = now
+
+        def speak() -> dict:
+            cp._audioctrl.play_bytes(cp.speech.say(text))
+            return {"text": text}
+
+        return cp._run_job(
+            cp._ai_jobs, "say", speak,
+            on_error=lambda _error: cp._audioctrl.sysaudio_play(aevent.FAILED),
+        )
+
+    def morning_test(self) -> dict:
+        """The morning routine compressed, like SIGUSR1."""
+        self._cp.start_morning_test()
+        return {"started": True}
+
+    def night_test(self) -> dict:
+        """The night-off now, like SIGUSR2."""
+        self._cp._night_off()
+        return {"done": True}
 
     # ---- preset clips ------------------------------------------------------
 

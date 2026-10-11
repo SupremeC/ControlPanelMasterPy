@@ -85,7 +85,11 @@ so things can be turned off from a phone when the panel is off. Set
 `web_enabled = False` to run without it. The page's "Knappljud" section
 replaces a button's default clip with any audio file from the phone
 (`ffmpeg` converts it to 48 kHz mono WAV; max 20 MB and 60 s) and names
-the buttons (`daemon/presets.json`, not in git).
+the buttons (`daemon/presets.json`, not in git). The page follows the
+panel through `/api/events` (server-sent events) and falls back to
+polling. `POST /api/say` speaks a text on the panel (one OpenAI call
+each, at most one per ten seconds); `POST /api/test/morning` and
+`/api/test/night` do what the USR1/USR2 signals do.
 
 #### Tools:
 Run on the Pi from the repo root with the daemon stopped (they use the

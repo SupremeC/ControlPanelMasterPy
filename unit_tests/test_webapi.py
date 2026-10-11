@@ -9,13 +9,14 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import time
 import unittest
 import urllib.request
 
 from fastapi.testclient import TestClient
 
 from daemon.config import Config
-from daemon.webapi import WebApi
+from daemon.webapi import StateBroadcast, WebApi
 
 
 class FakeRequest:
@@ -367,6 +368,124 @@ class TestPresetRoutes(unittest.TestCase):
 
     def test_list(self):
         self.assertEqual([], self.client.get("/api/presets").json())
+
+
+class TestBroadcast(unittest.TestCase):
+    def test_publishToSubscribers_dropWhenFull(self):
+        # arrange
+        hub = StateBroadcast()
+        a = hub.subscribe()
+        b = hub.subscribe()
+        self.assertEqual(2, hub.count)
+
+        # act
+        for i in range(StateBroadcast.QUEUE_SIZE + 3):
+            hub.publish(str(i))
+        hub.unsubscribe(a)
+        hub.unsubscribe(a)  # twice is fine
+        items = []
+        while not b.empty():
+            items.append(b.get_nowait())
+        hub.publish("late")
+
+        # assert: the first QUEUE_SIZE kept, the rest dropped, a gets nothing more
+        self.assertEqual(StateBroadcast.QUEUE_SIZE, a.qsize())
+        self.assertEqual("0", a.get_nowait())
+        self.assertEqual([str(i) for i in range(StateBroadcast.QUEUE_SIZE)], items)
+        self.assertEqual(1, hub.count)
+        self.assertEqual("late", b.get_nowait())
+        self.assertTrue(a.empty() or a.qsize() == StateBroadcast.QUEUE_SIZE - 1)
+
+
+class TestEvents(unittest.TestCase):
+    """Against a real server on a free port: Starlette's TestClient
+    collects a response body in full, which an event stream never is."""
+
+    def _serve(self, fake: FakeRequest, **config) -> WebApi:
+        cfg = Config(
+            web_enabled=False,
+            web_host="127.0.0.1",
+            web_port=0,
+            web_dir=Path(tempfile.gettempdir()) / "no-such-web-dir",
+            **config,
+        )
+        api = WebApi(cfg, fake)
+        api.start()
+        self.addCleanup(api.stop)
+        return api
+
+    @staticmethod
+    def _open(api: WebApi):
+        return urllib.request.urlopen(f"http://127.0.0.1:{api.port}/api/events", timeout=3)
+
+    def test_streamsFirstStateThenPublished(self):
+        # arrange
+        api = self._serve(FakeRequest({"state": {"demo": False}}), web_events_ping=0.2)
+
+        # act
+        with self._open(api) as response:
+            first = [response.readline().decode().rstrip("\n") for _ in range(2)]
+            deadline = time.monotonic() + 2
+            while api.broadcast.count == 0 and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertEqual(1, api.broadcast.count)
+            api.broadcast.publish('{"demo": true}')
+            later = []
+            while True:
+                line = response.readline().decode().rstrip("\n")
+                later.append(line)
+                if line.startswith("data:") and "true" in line:
+                    break
+        deadline = time.monotonic() + 3
+        while api.broadcast.count and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        # assert
+        self.assertEqual("text/event-stream; charset=utf-8", response.headers["content-type"])
+        self.assertEqual("no-cache", response.headers["cache-control"])
+        self.assertEqual(["event: state", 'data: {"demo": false}'], first)
+        self.assertIn('data: {"demo": true}', later)
+        self.assertEqual(0, api.broadcast.count)  # unsubscribed after the client left
+
+    def test_noStateYet_stillStreams(self):
+        # arrange: the main loop never answers
+        api = self._serve(
+            FakeRequest({"state": None}), web_events_ping=0.1, web_command_timeout=0.05
+        )
+
+        # act
+        with self._open(api) as response:
+            first = response.readline().decode().rstrip("\n")
+            ping = ""
+            for _ in range(4):
+                ping = response.readline().decode().rstrip("\n")
+                if ping:
+                    break
+
+        # assert
+        self.assertEqual(": no state yet", first)
+        self.assertEqual(": ping", ping)
+
+
+class TestSayAndTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeRequest({"say": {"text": "hej"}})
+        self.client = make_client(self.fake)
+
+    def test_say(self):
+        response = self.client.post("/api/say", json={"text": "  hej Axel "})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([("say", {"text": "  hej Axel "})], self.fake.calls)
+
+    def test_say_validation(self):
+        self.assertEqual(422, self.client.post("/api/say", json={"text": ""}).status_code)
+        self.assertEqual(422, self.client.post("/api/say", json={"text": "x" * 201}).status_code)
+        self.assertEqual([], self.fake.calls)
+
+    def test_triggers(self):
+        self.client.post("/api/test/morning")
+        self.client.post("/api/test/night")
+        self.assertEqual([("morning_test", {}), ("night_test", {})], self.fake.calls)
 
 
 class TestLifecycle(unittest.TestCase):

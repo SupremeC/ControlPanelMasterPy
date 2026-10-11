@@ -137,6 +137,14 @@ class Config:
     web_port: int = 8080
     web_dir: Path = DAEMON_DIR / "web"  # the page; without it, a link to /docs
     web_command_timeout: float = 3  # seconds the HTTP thread waits for the main loop
+    # /api/events: while a page listens, the state is compared this often
+    # and sent when it changed; a keep-alive comment goes out every ping.
+    web_events_interval: float = 0.5  # seconds
+    web_events_ping: float = 15  # seconds
+    # /api/say: text-to-speech on the panel (costs an OpenAI call each).
+    say_max_chars: int = 200
+    say_min_interval: float = 10  # seconds between two calls
+    web_say_timeout: float = 45  # HTTP wait for synthesis and playback
 
     # Preset clips (daemon/presets.py): the ten audio buttons' active
     # clips and their defaults. AudioCtrl uses the same two directories

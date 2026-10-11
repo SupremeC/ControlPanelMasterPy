@@ -5,7 +5,7 @@
 "use strict";
 
 const POLL_MS = 2000;
-const TIMEOUT_MS = 5000;
+const TIMEOUT_MS = 60000; // /api/say answers after the speech has played
 const ARM_MS = 3000; // "Släck allt" needs a second tap within this
 
 let state = null;
@@ -49,7 +49,8 @@ function detailOf(data) {
 const get = (path) => call("GET", path);
 const post = (path, body) => call("POST", path, body);
 
-/* Does a change: shows it at once (patch), sends it, refreshes. */
+/* Does a change: shows it at once (patch), sends it, refreshes. With the
+   event stream open the daemon sends the new state by itself. */
 async function act(path, body, patch) {
   if (patch && state) {
     patch(state);
@@ -60,17 +61,23 @@ async function act(path, body, patch) {
   } catch (e) {
     toast(e.message, true);
   }
-  await refresh();
+  if (!source) await refresh();
 }
 
-// ---- polling -------------------------------------------------------------
+// ---- state updates: the event stream, or polling without it -----------------
+
+let source = null; // EventSource on /api/events
+
+function gotState(s) {
+  state = s;
+  failures = 0;
+  $("banner").classList.add("hidden");
+  render(s);
+}
 
 async function refresh() {
   try {
-    state = await get("/api/state");
-    failures = 0;
-    $("banner").classList.add("hidden");
-    render(state);
+    gotState(await get("/api/state"));
   } catch (e) {
     failures += 1;
     if (failures >= 2) $("banner").classList.remove("hidden");
@@ -86,11 +93,34 @@ function schedule() {
   }, POLL_MS);
 }
 
+function connect() {
+  if (!window.EventSource) {
+    refresh().then(schedule);
+    return;
+  }
+  if (source) return;
+  source = new EventSource("/api/events");
+  source.addEventListener("state", (ev) => gotState(JSON.parse(ev.data)));
+  source.onerror = () => {
+    // The browser reconnects by itself; say so after two failures.
+    failures += 1;
+    if (failures >= 2) $("banner").classList.remove("hidden");
+  };
+}
+
+function disconnect() {
+  clearTimeout(pollTimer);
+  if (source) {
+    source.close();
+    source = null;
+  }
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    clearTimeout(pollTimer);
+    disconnect();
   } else {
-    refresh().then(schedule);
+    connect();
   }
 });
 
@@ -347,6 +377,25 @@ function wire() {
   $("btn-bedlamp").addEventListener("click", () => act("/api/bedlamp/toggle"));
   $("btn-stop").addEventListener("click", () => act("/api/audio/stop"));
 
+  $("say-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const input = $("say-text");
+    const button = $("btn-say");
+    const text = input.value.trim();
+    if (!text) return;
+    button.disabled = true;
+    button.textContent = "Talar…";
+    try {
+      await post("/api/say", { text });
+      input.value = "";
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Säg";
+    }
+  });
+
   const vol = $("vol");
   trackSlider(vol);
   vol.addEventListener("change", () => {
@@ -416,7 +465,7 @@ function toast(message, isError) {
 // ---- start ---------------------------------------------------------------
 
 wire();
-refresh().then(schedule);
+connect();
 loadSounds();
 loadPresets();
 setInterval(() => {

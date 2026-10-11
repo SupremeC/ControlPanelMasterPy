@@ -9,6 +9,7 @@ two job lanes are started. Never call ControlPanel.start() here.
 
 from concurrent.futures import Future
 import datetime
+import json
 from queue import Empty
 import threading
 import time
@@ -829,6 +830,45 @@ class TestStatusResyncAtNight(EventLoopTestCase):
 
         # assert
         self.assertTrue(self.cp._ctrls.get_ctrl_by_name("masterSw").state)
+
+
+class TestStateBroadcast(EventLoopTestCase):
+    """The /api/events feed: the main thread sends the state only to
+    listeners and only when it changed."""
+
+    def test_sendsChangesToListenersOnly(self):
+        # arrange
+        hub = self.cp._webapi.broadcast
+        self.cp._broadcast_state()  # nobody listens
+        q = hub.subscribe()
+
+        # act
+        self.cp._broadcast_state()  # first with a listener
+        self.cp._broadcast_state()  # nothing changed
+        self.cp.demo_on = True
+        self.cp._broadcast_state()  # changed
+
+        # assert
+        payloads = []
+        while not q.empty():
+            payloads.append(json.loads(q.get_nowait()))
+        self.assertEqual([False, True], [p["demo"] for p in payloads])
+        self.assertTrue(self.cp._timers)  # rescheduled itself
+
+    def test_listenerGone_nextOneGetsCurrentState(self):
+        # arrange
+        hub = self.cp._webapi.broadcast
+        q = hub.subscribe()
+        self.cp._broadcast_state()
+        hub.unsubscribe(q)
+        self.cp._broadcast_state()  # forgets the last payload
+
+        # act
+        q2 = hub.subscribe()
+        self.cp._broadcast_state()
+
+        # assert
+        self.assertEqual(1, q2.qsize())
 
 
 class TestCommands(EventLoopTestCase):

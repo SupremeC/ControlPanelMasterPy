@@ -14,23 +14,30 @@ in web_command_timeout 504. GET never changes anything: with no auth a
 bookmarked or prefetched link must not switch a 230 V socket.
 """
 
+import asyncio
 from concurrent.futures import Future, TimeoutError as FutureTimeout
+import json
 import logging
 import os
 import pathlib
+import queue
 import re
 import tempfile
 import threading
-from typing import Annotated, Any, Callable, Literal
+from typing import Annotated, Any, AsyncIterator, Callable, Literal
 
+import anyio
 from fastapi import FastAPI, File, Form, HTTPException, Path, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.datastructures import MutableHeaders
 import uvicorn
 
 from daemon.config import Config
 from daemon.presets import NAME_MAX
+
+SAY_MAX_CHARS = 200  # the route's hard limit; Config.say_max_chars may be lower
 
 logger = logging.getLogger("daemon.web")
 
@@ -70,6 +77,107 @@ class NameBody(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=NAME_MAX)]
 
 
+class SayBody(BaseModel):
+    text: Annotated[str, Field(min_length=1, max_length=SAY_MAX_CHARS)]
+
+
+class EventStream(Response):
+    """A server-sent-events response that always closes its generator.
+    Starlette's StreamingResponse leaves the generator suspended when the
+    client has gone and send() raises, so its finally (the unsubscribe)
+    would only run at garbage collection or shutdown."""
+
+    media_type = "text/event-stream"
+
+    def __init__(self, generator: AsyncIterator[str]):
+        super().__init__(
+            content=None,
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+        # The base class declares content-length 0 for an empty body; a
+        # stream has no length (uvicorn then uses chunked encoding).
+        self.raw_headers = [(k, v) for k, v in self.raw_headers if k != b"content-length"]
+        self._generator = generator
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": self.status_code,
+                    "headers": self.raw_headers,
+                }
+            )
+            async for chunk in self._generator:
+                await send(
+                    {"type": "http.response.body", "body": chunk.encode(), "more_body": True}
+                )
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        finally:
+            await self._generator.aclose()
+
+
+class NoCachePageFiles:
+    """ASGI middleware: Cache-Control: no-cache on everything outside
+    /api/, so a phone asks for app.js again on every load (the ETag
+    makes that cheap). A plain ASGI middleware, not Starlette's
+    BaseHTTPMiddleware: that one runs the app in its own task and hides
+    client disconnects from /api/events."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope["path"].startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_header(message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = "no-cache"
+            await send(message)
+
+        await self.app(scope, receive, send_with_header)
+
+
+class StateBroadcast:
+    """Fan-out of state snapshots (JSON text) to the /api/events clients.
+    publish() runs on the main thread; each client reads its own queue
+    on the web side. A client that cannot keep up misses a snapshot and
+    gets the next one."""
+
+    QUEUE_SIZE = 8
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._queues: list[queue.Queue] = []
+
+    def subscribe(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue(self.QUEUE_SIZE)
+        with self._lock:
+            self._queues.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue) -> None:
+        with self._lock:
+            if q in self._queues:
+                self._queues.remove(q)
+
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return len(self._queues)
+
+    def publish(self, payload: str) -> None:
+        with self._lock:
+            targets = list(self._queues)
+        for q in targets:
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                pass
+
+
 PLACEHOLDER = """<!doctype html><html lang="sv"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontrollpanelen</title>
@@ -79,9 +187,14 @@ PLACEHOLDER = """<!doctype html><html lang="sv"><meta charset="utf-8">
 href="/docs">/docs</a>.</p></body></html>"""
 
 
-def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
+def build_app(
+    request: RequestFn,
+    config: Config | None = None,
+    broadcast: StateBroadcast | None = None,
+) -> FastAPI:
     """The FastAPI app over `request` (ControlPanel.request or a fake)."""
     cfg = config or Config()
+    broadcast = broadcast or StateBroadcast()
     app = FastAPI(
         title="Kontrollpanelen",
         description="Fjärrkontroll för panelen på hemmanätet. Ingen inloggning.",
@@ -115,6 +228,42 @@ def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
         """Everything the page shows. `text` holds Swedish labels for a
         Stream Deck key."""
         return run("state")
+
+    @app.get(
+        "/api/events",
+        tags=["status"],
+        responses={200: {"content": {"text/event-stream": {}}, "description": "The stream"}},
+    )
+    async def events(http_request: Request) -> Response:
+        """Server-sent events: `event: state` with the same JSON as
+        /api/state, first at once and then whenever it changes, plus a
+        comment line every few seconds to keep the connection alive. A
+        client that left is noticed at the next comment, at the latest."""
+        q = broadcast.subscribe()
+
+        async def stream() -> AsyncIterator[str]:
+            logger.debug("events: client %s connected", http_request.client)
+            try:
+                try:
+                    first = await asyncio.wait_for(
+                        asyncio.wrap_future(request("state")), cfg.web_command_timeout
+                    )
+                    yield f"event: state\ndata: {json.dumps(first, ensure_ascii=False)}\n\n"
+                except Exception:
+                    yield ": no state yet\n\n"
+                while not await http_request.is_disconnected():
+                    try:
+                        payload = await anyio.to_thread.run_sync(q.get, True, cfg.web_events_ping)
+                    except queue.Empty:
+                        logger.debug("events: ping to %s", http_request.client)
+                        yield ": ping\n\n"
+                        continue
+                    yield f"event: state\ndata: {payload}\n\n"
+            finally:
+                broadcast.unsubscribe(q)
+                logger.debug("events: client %s gone", http_request.client)
+
+        return EventStream(stream())
 
     # ---- sockets and lamps --------------------------------------------------
 
@@ -191,6 +340,13 @@ def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
     def unmute() -> dict:
         return run("unmute")
 
+    @app.post("/api/say", tags=["ljud"])
+    def say(body: SayBody) -> dict:
+        """Speaks the text on the panel (text-to-speech; one OpenAI call).
+        At most one every say_min_interval seconds; 409 while the panel
+        is muted. Answers when the speech has been played."""
+        return run("say", timeout=cfg.web_say_timeout, text=body.text)
+
     @app.post("/api/audio/volume", tags=["ljud"])
     def set_volume(body: VolumeBody) -> dict:
         """Software volume in percent. The panel's pot takes over the
@@ -230,6 +386,18 @@ def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
     @app.post("/api/strips/{segment}/effect/{which}", tags=["ljusslingor"])
     def strip_effect(segment: Segment, which: Literal["next", "prev", "off"]) -> dict:
         return run("strip_effect", segment=segment, which=which)
+
+    # ---- test triggers (the signals' siblings) ---------------------------------
+
+    @app.post("/api/test/morning", tags=["test"])
+    def morning_test() -> dict:
+        """The morning routine compressed, alarm in two minutes (SIGUSR1)."""
+        return run("morning_test")
+
+    @app.post("/api/test/night", tags=["test"])
+    def night_test() -> dict:
+        """The night-off now (SIGUSR2)."""
+        return run("night_test")
 
     # ---- preset clips ----------------------------------------------------------
 
@@ -303,14 +471,7 @@ def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
 
     # ---- the page --------------------------------------------------------------
 
-    @app.middleware("http")
-    async def revalidate_page_files(request, call_next):
-        """A phone keeps app.js for days otherwise; no-cache makes it ask
-        again on every load, and the ETag makes that cheap."""
-        response = await call_next(request)
-        if not request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = "no-cache"
-        return response
+    app.add_middleware(NoCachePageFiles)
 
     if cfg.web_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(cfg.web_dir), html=True), name="web")
@@ -329,7 +490,8 @@ class WebApi:
 
     def __init__(self, config: Config, request: RequestFn):
         self._cfg = config
-        self.app = build_app(request, config)
+        self.broadcast = StateBroadcast()  # ControlPanel publishes state changes here
+        self.app = build_app(request, config, self.broadcast)
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
 

@@ -558,6 +558,65 @@ class TestPresets(RemoteTestCase):
         self.assertEqual(list(range(2, 12)), [r["pin"] for r in rows])
 
 
+class TestSay(RemoteTestCase):
+    def setUp(self):
+        super().setUp()
+        self.cp._ai_jobs.start()
+        self.addCleanup(self.cp._ai_jobs.stop)
+        self.cp.speech = mock.Mock()
+        self.cp.speech.say.return_value = b"mp3"
+
+    def test_speaksOnAiLane(self):
+        # act
+        future = self.remote.say("  Hej   Axel ")
+        self.assertTrue(self.process_until(future.done))
+
+        # assert
+        self.assertEqual({"text": "Hej Axel"}, future.result())
+        self.cp.speech.say.assert_called_once_with("Hej Axel")
+        self.cp._audioctrl.play_bytes.assert_called_once_with(b"mp3")
+
+    def test_refusals(self):
+        with self.assertRaises(ValueError):
+            self.remote.say("   ")
+        with self.assertRaises(ValueError):
+            self.remote.say("x" * (self.cfg.say_max_chars + 1))
+        self.cp._audioctrl.get_volume.return_value = 0
+        with self.assertRaises(ValueError):
+            self.remote.say("hej")
+        self.cp.speech.say.assert_not_called()
+
+    def test_rateLimited(self):
+        # act
+        first = self.remote.say("ett")
+        with self.assertRaises(ValueError):
+            self.remote.say("två")
+        self.process_until(first.done)
+
+        # assert
+        self.cp.speech.say.assert_called_once_with("ett")
+
+    def test_failure_playsFailed(self):
+        # arrange
+        self.cp.speech.say.side_effect = RuntimeError("no network")
+
+        # act
+        future = self.remote.say("hej")
+        self.process_until(lambda: future.done() and self.cp._audioctrl.sysaudio_play.called)
+
+        # assert
+        self.assertIsInstance(future.exception(), RuntimeError)
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.FAILED)
+
+    def test_triggers(self):
+        self.cp.start_morning_test = mock.Mock()
+        self.cp._night_off = mock.Mock()
+        self.assertEqual({"started": True}, self.remote.morning_test())
+        self.assertEqual({"done": True}, self.remote.night_test())
+        self.cp.start_morning_test.assert_called_once()
+        self.cp._night_off.assert_called_once_with()
+
+
 class TestAllOff(RemoteTestCase):
     def test_everythingOff(self):
         # arrange

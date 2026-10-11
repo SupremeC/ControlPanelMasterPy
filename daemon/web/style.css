@@ -161,6 +161,18 @@ main {
 .slider-label { flex: none; min-width: 92px; color: var(--muted); font-size: 15px; }
 .slider-label b { color: var(--text); }
 input[type=range] { flex: 1; min-width: 0; height: var(--touch); accent-color: var(--amber); }
+input[type=text] {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--card-edge);
+  background: #0f0f10;
+  color: var(--text);
+  font: inherit;
+}
+form.row { margin: 0; }
 input[type=color] {
   flex: none;
   width: 48px; height: 40px;

@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import heapq
 import itertools
+import json
 import logging
 from queue import Empty, Full, Queue
 import random
@@ -179,6 +180,7 @@ class ControlPanel:
         self._wled_snapshot_job: Future | None = None
         self.remote = Remote(self)
         self._webapi = WebApi(self._config, self.request)
+        self._last_broadcast: str | None = None
 
     def _new_morning(self, config: Config) -> MorningRoutine:
         return MorningRoutine(
@@ -253,6 +255,24 @@ class ControlPanel:
         """After a WLED command: the next wled_snapshot() reads again."""
         self._wled_snapshot_at = 0.0
 
+    def _broadcast_state(self) -> None:
+        """Main-thread timer: while a page listens on /api/events, sends
+        the state whenever it differs from the last one sent. Reschedules
+        itself every web_events_interval."""
+        try:
+            broadcast = self._webapi.broadcast
+            if broadcast.count:
+                payload = json.dumps(self.remote.state(), ensure_ascii=False)
+                if payload != self._last_broadcast:
+                    self._last_broadcast = payload
+                    broadcast.publish(payload)
+            else:
+                self._last_broadcast = None
+        except Exception:
+            logger.exception("State broadcast failed")
+        finally:
+            self.call_later(self._config.web_events_interval, self._broadcast_state)
+
     def _components(self) -> list[tuple[str, Component]]:
         """Components in start order. The job lanes come late so they
         stop first, before the audio and WLED their jobs use; the web API
@@ -284,6 +304,8 @@ class ControlPanel:
         self.checkins.start()
         self.night.start()
         self.call_later(WEATHER_FIRST_REFRESH, self._weather_refresh)
+        if self._config.web_enabled:
+            self.call_later(self._config.web_events_interval, self._broadcast_state)
 
     def stop(self):
         """Stops all started components in reverse order.
