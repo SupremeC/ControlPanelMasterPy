@@ -107,6 +107,7 @@ def replace_file(src: Path, dst: Path) -> None:
     os.close(fd)
     try:
         shutil.copyfile(src, tmp)
+        os.chmod(tmp, 0o644)  # mkstemp makes it 0600; the other clips are readable
         os.replace(tmp, dst)
     finally:
         if os.path.exists(tmp):
