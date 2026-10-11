@@ -77,7 +77,8 @@ restart the daemon.
 The daemon serves a page and a JSON API on the LAN, port 8080
 (`web_port` in `daemon/config.py`), without authentication: anyone on
 the WiFi can switch the sockets and lamps. `http://<pi>:8080/` is the
-page (not written yet), `http://<pi>:8080/docs` the interactive API
+page (daemon/web, Swedish, add it to the phone's home screen),
+`http://<pi>:8080/docs` the interactive API
 description. Actions are `POST` only; `GET` never changes anything. The
 API bypasses the panel's master, inputs and safety switches on purpose,
 so things can be turned off from a phone when the panel is off. Set
