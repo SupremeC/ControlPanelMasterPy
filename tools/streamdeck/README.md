@@ -65,7 +65,7 @@ editing a key; unsaved edits are not applied.
 | 1 | `Säng` (uttag) | `text.bed_socket` | `toggle_bed.lua` | `På` → `uttag_on.png`, `Av` → `uttag_off.png` |
 | 2 | `Byrå` (uttag) | `text.drawer_socket` | `toggle_drawer.lua` | `På` → `uttag_on.png`, `Av` → `uttag_off.png` |
 | 3 | `Bakgrund` | `text.backlight` | `toggle_backlight.lua` | `På` → `bakgrund_on.png`, `Av` → `bakgrund_off.png` |
-| 4 | `Knapplampor` | `text.button_leds` (see note) | `toggle_leds.lua` | `På` → `knapplampor_on.png`, `Av` → `knapplampor_off.png` |
+| 4 | `Knapplampor` | `text.button_leds` | `toggle_leds.lua` | `På` → `knapplampor_on.png`, `Av` → `knapplampor_off.png` |
 | 5 | `Säng` (slinga) | `strips.segments.0.on` | `toggle_strip0.lua` | `true` → `slinga_on.png`, `false` → `slinga_off.png` |
 | 6 | `Fönster` (slinga) | `strips.segments.1.on` | `toggle_strip1.lua` | `true` → `slinga_on.png`, `false` → `slinga_off.png` |
 | 7 | `Demo` | `text.demo` | `toggle_demo.lua` | `På` → `demo_on.png`, `Av` → `demo_off.png` |
@@ -74,8 +74,6 @@ editing a key; unsaved edits are not applied.
 All mapping targets are full paths, e.g. `C:\Panelen\icons\uttag_on.png`.
 
 Notes:
-- `text.button_leds` is not in the state yet; use `button_leds` (gives
-  `true`/`false`, map those) until it is.
 - The Lua scripts return the same kind of value as the selector (`På`/`Av`
   for the `text.*` keys, `true`/`false` for the strips), so the mapping
   works for both the poll and the press.

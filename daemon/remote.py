@@ -195,6 +195,7 @@ class Remote:
                 "bed_socket": _on_off(sockets["bed"]["on"]),
                 "drawer_socket": _on_off(sockets["drawer"]["on"]),
                 "backlight": _on_off(backlight),
+                "button_leds": _on_off(cp.btnLeds),
                 "strip_0": self._strip_text(strips[0]),
                 "strip_1": self._strip_text(strips[1]),
                 "volume": f"{volume} %",
