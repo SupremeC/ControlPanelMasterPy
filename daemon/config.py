@@ -138,6 +138,19 @@ class Config:
     web_dir: Path = DAEMON_DIR / "web"  # the page; without it, a link to /docs
     web_command_timeout: float = 3  # seconds the HTTP thread waits for the main loop
 
+    # Preset clips (daemon/presets.py): the ten audio buttons' active
+    # clips and their defaults. AudioCtrl uses the same two directories
+    # (hardcoded there); keep them in step. Uploads from the page are
+    # converted with ffmpeg on the audio lane.
+    preset_sounds_dir: Path = DAEMON_DIR / "sounds"
+    preset_defaults_dir: Path = DAEMON_DIR / "systemsounds"
+    preset_upload_dir: Path = DAEMON_DIR / "tmp_upload"
+    preset_upload_max_bytes: int = 20 * 1024 * 1024
+    preset_max_seconds: float = 60
+    preset_upload_timeout: float = 40  # HTTP wait for probe + convert + replace
+    ffmpeg_timeout: float = 30  # seconds for one conversion
+    presets_file: Path = DAEMON_DIR / "presets.json"  # button names; gitignored
+
     # Speech (daemon/speech.py): local Swedish templates, the text model
     # only for the joke and the clothing advice, then text-to-speech. One
     # voice for everything, also the answers to recorded questions

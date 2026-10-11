@@ -82,7 +82,10 @@ page (daemon/web, Swedish, add it to the phone's home screen),
 description. Actions are `POST` only; `GET` never changes anything. The
 API bypasses the panel's master, inputs and safety switches on purpose,
 so things can be turned off from a phone when the panel is off. Set
-`web_enabled = False` to run without it.
+`web_enabled = False` to run without it. The page's "Knappljud" section
+replaces a button's default clip with any audio file from the phone
+(`ffmpeg` converts it to 48 kHz mono WAV; max 20 MB and 60 s) and names
+the buttons (`daemon/presets.json`, not in git).
 
 #### Tools:
 Run on the Pi from the repo root with the daemon stopped (they use the

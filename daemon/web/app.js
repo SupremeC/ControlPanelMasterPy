@@ -140,6 +140,9 @@ function render(s) {
   $("vol-text").textContent = s.text.volume;
   $("muted-hint").classList.toggle("hidden", !s.audio.muted);
   for (const b of document.querySelectorAll("#presets .btn, #sysounds .btn")) b.disabled = s.audio.muted;
+  for (const b of document.querySelectorAll("#preset-list .play")) {
+    b.disabled = s.audio.muted || b.closest(".preset").querySelector(".chip.missing") !== null;
+  }
   $("btn-stop").classList.toggle("playing", s.audio.playing);
 }
 
@@ -175,6 +178,139 @@ async function playSound(id, button) {
     toast(e.message, true);
   }
   setTimeout(() => button.classList.remove("playing"), 600);
+}
+
+// ---- preset clips (Knappljud) ---------------------------------------------
+
+const CHIP_TEXT = { default: "Standard", recording: "Inspelning", missing: "Saknas" };
+
+function seconds(value) {
+  return value === null || value === undefined ? "" : ` · ${String(value).replace(".", ",")} s`;
+}
+
+async function loadPresets() {
+  let presets;
+  try {
+    presets = await get("/api/presets");
+  } catch (e) {
+    return;
+  }
+  const list = $("preset-list");
+  list.replaceChildren(...presets.map(presetRow));
+  if (state) render(state);
+}
+
+function presetRow(p) {
+  const box = document.createElement("div");
+  box.className = "preset";
+  box.innerHTML = `
+    <div class="row">
+      <div class="label">
+        <button class="name" type="button"></button>
+        <small class="hint"><span class="chip"></span> <span class="len"></span></small>
+      </div>
+      <div class="inline">
+        <button class="btn small listen" type="button" title="Lyssna i mobilen">▶</button>
+        <button class="btn small play" type="button">Panelen</button>
+      </div>
+    </div>
+    <div class="row buttons">
+      <label class="btn file">Byt standardljud<input type="file" accept="audio/*"></label>
+      <button class="btn restore" type="button">Återställ standard</button>
+    </div>
+    <label class="keep hidden"><input type="checkbox"> Behåll inspelningen på knappen</label>
+    <progress max="100" value="0" hidden></progress>`;
+  const name = box.querySelector(".name");
+  const chip = box.querySelector(".chip");
+  const len = box.querySelector(".len");
+  const restore = box.querySelector(".restore");
+  const keep = box.querySelector(".keep");
+  const file = box.querySelector("input[type=file]");
+  const bar = box.querySelector("progress");
+
+  name.textContent = p.name;
+  chip.textContent = CHIP_TEXT[p.active] || p.active;
+  chip.classList.add(p.active);
+  len.textContent = seconds(p.active_seconds).replace(" · ", "");
+  restore.classList.toggle("hidden", p.active !== "recording" || !p.has_default);
+  keep.classList.toggle("hidden", p.active !== "recording");
+  box.querySelector(".listen").disabled = p.active === "missing";
+  box.querySelector(".play").disabled = p.active === "missing";
+
+  name.addEventListener("click", async () => {
+    const answer = prompt("Namn på knappen", p.name);
+    if (answer === null) return;
+    const trimmed = answer.trim();
+    if (!trimmed) return;
+    try {
+      await call("PATCH", `/api/presets/${p.pin}`, { name: trimmed });
+    } catch (e) {
+      toast(e.message, true);
+    }
+    loadPresets();
+    loadSounds();
+  });
+  box.querySelector(".listen").addEventListener("click", () => {
+    const player = $("player");
+    player.src = `/api/presets/${p.pin}/audio?which=active&t=${Date.now()}`;
+    player.play().catch((e) => toast(e.message, true));
+  });
+  box.querySelector(".play").addEventListener("click", (ev) => playSound(p.id, ev.currentTarget));
+  restore.addEventListener("click", async () => {
+    try {
+      await post(`/api/presets/${p.pin}/restore`);
+      toast(`${p.name}: standardljudet är tillbaka`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    loadPresets();
+  });
+  file.addEventListener("change", () => {
+    if (file.files.length) uploadDefault(p, file.files[0], !keep.querySelector("input").checked, bar);
+    file.value = "";
+  });
+  return box;
+}
+
+function uploadDefault(p, blob, activate, bar) {
+  const form = new FormData();
+  form.append("file", blob, blob.name);
+  form.append("activate", activate ? "true" : "false");
+  const xhr = new XMLHttpRequest();
+  bar.hidden = false;
+  bar.value = 0;
+  xhr.upload.addEventListener("progress", (ev) => {
+    if (ev.lengthComputable) bar.value = Math.round((ev.loaded / ev.total) * 90);
+  });
+  xhr.addEventListener("load", () => {
+    bar.hidden = true;
+    let data = {};
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch (e) {
+      data = {};
+    }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const secs = seconds(data.seconds).replace(" · ", "");
+      toast(`${p.name}: nytt standardljud${secs ? ` (${secs})` : ""}`);
+    } else {
+      toast(detailOf(data) || `Fel ${xhr.status}`, true);
+    }
+    loadPresets();
+    loadSounds();
+  });
+  xhr.addEventListener("error", () => {
+    bar.hidden = true;
+    toast("Uppladdningen misslyckades", true);
+  });
+  xhr.addEventListener("loadstart", () => toast(`Laddar upp till ${p.name}…`));
+  xhr.timeout = 120000;
+  xhr.addEventListener("timeout", () => {
+    bar.hidden = true;
+    toast("Panelen svarar inte", true);
+  });
+  xhr.open("PUT", `/api/presets/${p.pin}/default`);
+  xhr.send(form);
 }
 
 // ---- wiring --------------------------------------------------------------
@@ -282,4 +418,8 @@ function toast(message, isError) {
 wire();
 refresh().then(schedule);
 loadSounds();
-setInterval(loadSounds, 60000);
+loadPresets();
+setInterval(() => {
+  loadSounds();
+  loadPresets();
+}, 60000);

@@ -16,27 +16,34 @@ bookmarked or prefetched link must not switch a 230 V socket.
 
 from concurrent.futures import Future, TimeoutError as FutureTimeout
 import logging
+import os
+import pathlib
+import re
+import tempfile
 import threading
 from typing import Annotated, Any, Callable, Literal
 
-from fastapi import FastAPI, HTTPException, Path, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, File, Form, HTTPException, Path, Query, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
 from daemon.config import Config
+from daemon.presets import NAME_MAX
 
 logger = logging.getLogger("daemon.web")
 
 THREAD_JOIN_TIMEOUT = 3  # seconds for uvicorn to finish at stop()
 START_TIMEOUT = 5  # seconds to wait for the socket at start()
 
+UPLOAD_CHUNK = 64 * 1024
 OnOff = Literal["on", "off", "toggle"]
 Socket = Literal["bed", "drawer"]
+Pin = Annotated[int, Path(ge=2, le=11, description="audio button 2-11")]
 Segment = Annotated[int, Path(ge=0, le=1, description="0 = säng, 1 = fönster")]
 Direction = Literal["up", "down"]
-Request = Callable[..., Future]  # ControlPanel.request
+RequestFn = Callable[..., Future]  # ControlPanel.request
 
 
 class OnBody(BaseModel):
@@ -59,6 +66,10 @@ class StripBody(BaseModel):
     effect: Literal["next", "prev", "off"] | None = None
 
 
+class NameBody(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=NAME_MAX)]
+
+
 PLACEHOLDER = """<!doctype html><html lang="sv"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontrollpanelen</title>
@@ -68,7 +79,7 @@ PLACEHOLDER = """<!doctype html><html lang="sv"><meta charset="utf-8">
 href="/docs">/docs</a>.</p></body></html>"""
 
 
-def build_app(request: Request, config: Config | None = None) -> FastAPI:
+def build_app(request: RequestFn, config: Config | None = None) -> FastAPI:
     """The FastAPI app over `request` (ControlPanel.request or a fake)."""
     cfg = config or Config()
     app = FastAPI(
@@ -78,10 +89,10 @@ def build_app(request: Request, config: Config | None = None) -> FastAPI:
         redoc_url=None,
     )
 
-    def run(command: str, **kwargs: Any) -> Any:
+    def run(command: str, timeout: float | None = None, **kwargs: Any) -> Any:
         """Runs the Remote command on the main thread and waits for it."""
         try:
-            return request(command, **kwargs).result(cfg.web_command_timeout)
+            return request(command, **kwargs).result(timeout or cfg.web_command_timeout)
         except FutureTimeout:
             raise HTTPException(504, "Panelen svarar inte") from None
         except KeyError as e:
@@ -220,6 +231,76 @@ def build_app(request: Request, config: Config | None = None) -> FastAPI:
     def strip_effect(segment: Segment, which: Literal["next", "prev", "off"]) -> dict:
         return run("strip_effect", segment=segment, which=which)
 
+    # ---- preset clips ----------------------------------------------------------
+
+    @app.get("/api/presets", tags=["knappljud"])
+    def presets() -> list[dict]:
+        """The ten audio buttons: name, whether a default exists, and
+        whether the active clip is the default or a recording."""
+        return run("presets")
+
+    @app.get("/api/presets/{pin}/audio", tags=["knappljud"])
+    def preset_audio(pin: Pin, which: Literal["active", "default"] = "active"):
+        """The clip itself (WAV), for listening on the phone."""
+        base = cfg.preset_sounds_dir if which == "active" else cfg.preset_defaults_dir
+        path = base / f"btn_{pin}.wav"
+        if not path.is_file():
+            raise HTTPException(404, "Inget klipp")
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            filename=f"knapp{pin}-{which}.wav",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.put("/api/presets/{pin}/default", tags=["knappljud"])
+    def upload_default(
+        pin: Pin,
+        request: Request,
+        file: UploadFile = File(..., description="any audio format; ffmpeg converts it"),
+        activate: bool = Form(True, description="also make it the active clip"),
+    ) -> dict:
+        """A new default clip for the button. 413 over
+        preset_upload_max_bytes, 409 when it is not audio or too long."""
+        limit = cfg.preset_upload_max_bytes
+        too_big = HTTPException(413, f"Filen är för stor (max {max(1, limit // (1024 * 1024))} MB)")
+        # The header counts the multipart framing too; the exact check is on the bytes.
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > limit + UPLOAD_CHUNK:
+            raise too_big
+        cfg.preset_upload_dir.mkdir(parents=True, exist_ok=True)
+        suffix = pathlib.PurePath(file.filename or "").suffix.lower()
+        if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
+            suffix = ".bin"
+        fd, tmp = tempfile.mkstemp(prefix="upload-", suffix=suffix, dir=cfg.preset_upload_dir)
+        written = 0
+        with os.fdopen(fd, "wb") as out:
+            while chunk := file.file.read(UPLOAD_CHUNK):
+                written += len(chunk)
+                if written > limit:
+                    break
+                out.write(chunk)
+        if written > limit:
+            os.remove(tmp)
+            raise too_big
+        return run(
+            "set_preset_default",
+            timeout=cfg.preset_upload_timeout,
+            pin=pin,
+            path=tmp,
+            activate=activate,
+            source=file.filename,
+        )
+
+    @app.post("/api/presets/{pin}/restore", tags=["knappljud"])
+    def restore_preset(pin: Pin) -> dict:
+        """The default becomes the active clip again (404 without one)."""
+        return run("restore_preset", pin=pin)
+
+    @app.patch("/api/presets/{pin}", tags=["knappljud"])
+    def rename_preset(pin: Pin, body: NameBody) -> dict:
+        return run("rename_preset", pin=pin, name=body.name)
+
     # ---- the page --------------------------------------------------------------
 
     @app.middleware("http")
@@ -246,7 +327,7 @@ class WebApi:
     """Component: uvicorn in a daemon thread. The constructor only
     builds the app; start() binds the port."""
 
-    def __init__(self, config: Config, request: Request):
+    def __init__(self, config: Config, request: RequestFn):
         self._cfg = config
         self.app = build_app(request, config)
         self._server: uvicorn.Server | None = None

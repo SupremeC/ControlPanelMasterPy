@@ -10,6 +10,7 @@ needs a snapshot. Never call ControlPanel.start() here.
 import datetime
 from pathlib import Path
 from queue import Empty
+import shutil
 import tempfile
 import time
 import unittest
@@ -17,8 +18,10 @@ import unittest.mock as mock
 
 from daemon import remote as remote_module
 from daemon.audio_ctrl import SysAudioEvent as aevent
+from daemon.config import Config
 from daemon.controlpanel_class import ControlPanel
 from daemon.packet import HWEvent
+from daemon.presets import PresetError
 from daemon.wled import SegmentState, WledStateSnapshot
 
 
@@ -36,7 +39,18 @@ def snapshot(on0=True, bri0=100, on1=False, bri1=0, fx0=0) -> WledStateSnapshot:
 
 class RemoteTestCase(unittest.TestCase):
     def setUp(self):
-        cp = ControlPanel()
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = Config(
+            web_enabled=False,
+            preset_sounds_dir=self.root / "sounds",
+            preset_defaults_dir=self.root / "systemsounds",
+            preset_upload_dir=self.root / "tmp_upload",
+            presets_file=self.root / "presets.json",
+        )
+        for d in (self.cfg.preset_sounds_dir, self.cfg.preset_defaults_dir, self.cfg.preset_upload_dir):
+            d.mkdir()
+        cp = ControlPanel(self.cfg)
         cp._audioctrl = mock.Mock()
         cp._audioctrl.master_volume = 70
         cp._audioctrl.get_volume.return_value = 0.7
@@ -233,11 +247,7 @@ class TestDemo(RemoteTestCase):
 class TestSounds(RemoteTestCase):
     def setUp(self):
         super().setUp()
-        self.sounds_dir = Path(tempfile.mkdtemp())
-        (self.sounds_dir / "btn_3.wav").write_bytes(b"RIFF")
-        patcher = mock.patch.object(remote_module, "PRESET_DIR", self.sounds_dir)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        (self.cfg.preset_sounds_dir / "btn_3.wav").write_bytes(b"RIFF")
 
     def test_list_presetsThenSystemSounds(self):
         # act
@@ -465,6 +475,87 @@ class TestState(RemoteTestCase):
 
         # assert
         self.assertTrue(self.remote.state()["audio"]["playing"])
+
+
+class TestPresets(RemoteTestCase):
+    def setUp(self):
+        super().setUp()
+        self.cp._audio_jobs.start()
+        self.addCleanup(self.cp._audio_jobs.stop)
+        self.upload = self.cfg.preset_upload_dir / "upload-x.m4a"
+        self.upload.write_bytes(b"m4a")
+
+    def test_upload_runsOnAudioLane_thenPanelFeedback(self):
+        # arrange
+        self.panel_on()
+        install = mock.Mock(return_value={"pin": 5, "seconds": 2.0, "activate": True})
+        self.remote.store.install = install
+
+        # act
+        future = self.remote.set_preset_default(5, str(self.upload), True, "Röstmemo.m4a")
+        self.assertTrue(self.process_until(
+            lambda: future.done() and self.cp._audioctrl.sysaudio_play.called
+        ))
+
+        # assert
+        install.assert_called_once_with(5, self.upload, True)
+        self.assertEqual({"pin": 5, "seconds": 2.0, "activate": True}, future.result())
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.REC_SAVED)
+        self.assertTrue(any(p.hw_event == HWEvent.BLINK3ENDHIGH for p in self.sent()))
+        self.assertEqual("Röstmemo.m4a", self.remote.store.status_of(5)["default_source"])
+
+    def test_upload_failure_playsFailed(self):
+        # arrange
+        self.remote.store.install = mock.Mock(side_effect=PresetError("för långt"))
+
+        # act
+        future = self.remote.set_preset_default(5, str(self.upload), True)
+        self.process_until(lambda: future.done() and self.cp._audioctrl.sysaudio_play.called)
+
+        # assert
+        self.assertIsInstance(future.exception(), PresetError)
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.FAILED)
+
+    def test_upload_outsideUploadDir_refused(self):
+        elsewhere = self.root / "elsewhere.m4a"
+        elsewhere.write_bytes(b"x")
+        with self.assertRaises(ValueError):
+            self.remote.set_preset_default(5, str(elsewhere), True)
+        with self.assertRaises(ValueError):
+            self.remote.set_preset_default(12, str(self.upload), True)
+        self.assertTrue(elsewhere.exists())
+
+    def test_restore_fromDefault(self):
+        # arrange
+        (self.cfg.preset_defaults_dir / "btn_6.wav").write_bytes(b"default")
+        (self.cfg.preset_sounds_dir / "btn_6.wav").write_bytes(b"recording")
+
+        # act
+        result = self.remote.restore_preset(6)
+
+        # assert
+        self.assertEqual("default", result["active"])
+        self.assertEqual(b"default", (self.cfg.preset_sounds_dir / "btn_6.wav").read_bytes())
+        self.cp._audioctrl.sysaudio_play.assert_called_with(aevent.REC_SAVED)
+        with self.assertRaises(KeyError):
+            self.remote.restore_preset(7)
+
+    def test_rename_showsInSoundsList(self):
+        # arrange
+        (self.cfg.preset_sounds_dir / "btn_4.wav").write_bytes(b"RIFF")
+
+        # act
+        result = self.remote.rename_preset(4, " Skratt ")
+
+        # assert
+        self.assertEqual("Skratt", result["name"])
+        self.assertIn({"id": "btn_4", "label": "Skratt"}, self.remote.list_sounds())
+        with self.assertRaises(ValueError):
+            self.remote.rename_preset(4, "")
+
+    def test_presetsCommand_listsTen(self):
+        rows = self.remote.command("presets")()
+        self.assertEqual(list(range(2, 12)), [r["pin"] for r in rows])
 
 
 class TestAllOff(RemoteTestCase):

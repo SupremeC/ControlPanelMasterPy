@@ -33,3 +33,7 @@ wget-log*
 daemon/speech_cache/
 daemon/jokes.json
 daemon/joke_state.json
+
+# Preset clip uploads and button names (daemon/presets.py)
+daemon/tmp_upload/
+daemon/presets.json

@@ -20,9 +20,12 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
-from daemon import global_variables
+from concurrent.futures import Future
+from pathlib import Path
+
 from daemon.audio_ctrl import SysAudioEvent as aevent
 from daemon.packet import HWEvent, Packet
+from daemon.presets import PRESET_PINS, Presets
 
 if TYPE_CHECKING:  # no import cycle: controlpanel_class imports this module
     from daemon.controlpanel_class import ControlPanel
@@ -35,8 +38,6 @@ BED_LAMP_BUTTON = 67
 BED_LAMP_PULSE = 0.1  # seconds; same as the panel
 STRIPS = {0: "säng", 1: "fönster"}
 STRIP_POWER_BUTTONS = {0: 32, 1: 35}
-PRESET_PINS = range(2, 12)
-PRESET_DIR = global_variables.root_path / "daemon" / "sounds"
 VOLUME_STEP = 5  # percent per dial tick
 BRIGHTNESS_STEP = 16  # of 255 per dial tick
 BRIGHTNESS_DEFAULT = 128  # when WLED's brightness is not known yet
@@ -100,6 +101,10 @@ COMMANDS = frozenset(
         "step_brightness",
         "strip_effect",
         "all_off",
+        "presets",
+        "set_preset_default",
+        "restore_preset",
+        "rename_preset",
     }
 )
 
@@ -125,10 +130,11 @@ def _check_int(value: Any, low: int, high: int, what: str) -> int:
 class Remote:
     """The commands. READ_ONLY ones are not logged (the page polls)."""
 
-    READ_ONLY = frozenset({"state", "list_sounds"})
+    READ_ONLY = frozenset({"state", "list_sounds", "presets"})
 
     def __init__(self, cp: ControlPanel):
         self._cp = cp
+        self.store = Presets(cp._config)  # the preset clips and their names
         # Strip values set from here, newer than the WLED snapshot:
         # segment -> {"at": monotonic, "on": bool, "brightness": int, "effect": int}
         self._strip_overlay: dict[int, dict[str, Any]] = {}
@@ -304,8 +310,8 @@ class Remote:
         """The preset buttons with a clip, then the system sounds."""
         sounds = []
         for pin in PRESET_PINS:
-            if (PRESET_DIR / f"btn_{pin}.wav").exists():
-                sounds.append({"id": f"btn_{pin}", "label": f"Knapp {pin}"})
+            if self.store.active_path(pin).is_file():
+                sounds.append({"id": f"btn_{pin}", "label": self.store.name(pin)})
         loaded = self._cp._audioctrl.systemsounds or {}
         for key in sorted(loaded):
             if key.upper() in aevent.__members__:
@@ -323,7 +329,7 @@ class Remote:
                 pin = int(key[4:])
             except ValueError:
                 raise KeyError(id) from None
-            if pin not in PRESET_PINS or not (PRESET_DIR / f"btn_{pin}.wav").exists():
+            if pin not in PRESET_PINS or not self.store.active_path(pin).is_file():
                 raise KeyError(id)
             audio.recsaved_play(pin)
             self._send(cp._ctrls.get_slavectrl(pin).leds[0].blink())
@@ -502,6 +508,63 @@ class Remote:
             self._send_brightness(segment, target)
         else:
             self._cp.invalidate_wled_snapshot()
+
+    # ---- preset clips ------------------------------------------------------
+
+    @staticmethod
+    def _pin(pin: Any) -> int:
+        if isinstance(pin, bool) or pin not in PRESET_PINS:
+            raise ValueError(f"Okänd knapp: {pin}")
+        return int(pin)
+
+    def _blink_saved(self, pin: int) -> None:
+        """The panel's own feedback for a saved clip."""
+        self._cp._audioctrl.sysaudio_play(aevent.REC_SAVED)
+        self._send(self._cp._ctrls.get_slavectrl(pin).leds[0].blink(True))
+
+    def presets(self) -> list[dict]:
+        return self.store.status()
+
+    def set_preset_default(
+        self, pin: int, path: str, activate: bool = True, source: str | None = None
+    ) -> Future:
+        """A new default clip from an uploaded file (the web API wrote it
+        to the upload dir). The work runs on the audio lane; the returned
+        Future ends when the files are in place. Then the panel plays
+        REC_SAVED, blinks the button and the source is noted."""
+        cp = self._cp
+        pin = self._pin(pin)
+        upload = Path(path)
+        store = self.store
+        if upload.resolve().parent != store.upload_dir.resolve() or not upload.is_file():
+            raise ValueError("Ingen uppladdad fil")
+
+        def done(result: dict) -> None:
+            store.note_default(pin, source)
+            self._blink_saved(pin)
+            logger.info(
+                "remote: preset %s default replaced (%.1f s, from %s%s)",
+                pin, result["seconds"], source or "?", "" if result["activate"] else ", not activated",
+            )
+
+        def failed(_error: BaseException) -> None:
+            cp._audioctrl.sysaudio_play(aevent.FAILED)
+
+        return cp._run_job(
+            cp._audio_jobs, "preset-upload", store.install, pin, upload, bool(activate),
+            on_done=done, on_error=failed,
+        )
+
+    def restore_preset(self, pin: int) -> dict:
+        pin = self._pin(pin)
+        self.store.restore(pin)  # KeyError without a default
+        self._blink_saved(pin)
+        return self.store.status_of(pin)
+
+    def rename_preset(self, pin: int, name: str) -> dict:
+        pin = self._pin(pin)
+        self.store.set_name(pin, name)  # PresetError (a ValueError) on a bad name
+        return self.store.status_of(pin)
 
     # ---- everything off -----------------------------------------------------
 

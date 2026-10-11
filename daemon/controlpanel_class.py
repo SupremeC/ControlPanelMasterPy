@@ -393,7 +393,10 @@ class ControlPanel:
             return
         error = event.future.exception()
         if error is not None:
-            logger.error("Job %s failed", event.name, exc_info=error)
+            if isinstance(error, ValueError):  # refused, not broken (e.g. a bad upload)
+                logger.warning("Job %s refused: %s", event.name, error)
+            else:
+                logger.error("Job %s failed", event.name, exc_info=error)
             if event.on_error is not None:
                 event.on_error(error)
             else:

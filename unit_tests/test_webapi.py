@@ -7,6 +7,7 @@ socket (port 0) to check start()/stop()."""
 from concurrent.futures import Future
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 import urllib.request
@@ -250,6 +251,122 @@ class TestStaticPage(unittest.TestCase):
         self.assertEqual(404, client.get("/nope.css").status_code)
         self.assertEqual(200, client.get("/api/state").status_code)  # API first
         self.assertNotIn("cache-control", client.get("/api/state").headers)
+
+
+class TestPresetRoutes(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = Config(
+            web_enabled=False,
+            web_dir=self.root / "no-web",
+            web_command_timeout=0.05,
+            preset_upload_timeout=0.05,
+            preset_sounds_dir=self.root / "sounds",
+            preset_defaults_dir=self.root / "systemsounds",
+            preset_upload_dir=self.root / "tmp_upload",
+            preset_upload_max_bytes=1000,
+        )
+        self.fake = FakeRequest({"presets": [], "set_preset_default": {"pin": 5, "seconds": 2.0, "activate": True}})
+        self.client = TestClient(WebApi(self.cfg, self.fake).app)
+
+    def test_upload_storesFileThenRunsCommand(self):
+        # act
+        response = self.client.put(
+            "/api/presets/5/default",
+            files={"file": ("Röstmemo 3.m4a", b"abc", "audio/mp4")},
+            data={"activate": "false"},
+        )
+
+        # assert
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(2.0, response.json()["seconds"])
+        command, kwargs = self.fake.calls[0]
+        self.assertEqual("set_preset_default", command)
+        self.assertEqual((5, False, "Röstmemo 3.m4a"), (kwargs["pin"], kwargs["activate"], kwargs["source"]))
+        path = Path(kwargs["path"])
+        self.assertEqual(self.cfg.preset_upload_dir, path.parent)
+        self.assertEqual(".m4a", path.suffix)
+        self.assertEqual(b"abc", path.read_bytes())
+
+    def test_upload_defaultsToActivate_oddSuffixBecomesBin(self):
+        # act
+        self.client.put("/api/presets/2/default", files={"file": ("weird.<x>", b"abc")})
+
+        # assert
+        _command, kwargs = self.fake.calls[0]
+        self.assertTrue(kwargs["activate"])
+        self.assertEqual(".bin", Path(kwargs["path"]).suffix)
+
+    def test_upload_tooBig_413_nothingLeft(self):
+        # act
+        response = self.client.put(
+            "/api/presets/5/default", files={"file": ("big.mp3", b"x" * 1500)}
+        )
+
+        # assert
+        self.assertEqual(413, response.status_code)
+        self.assertEqual([], self.fake.calls)
+        self.assertEqual([], list(self.cfg.preset_upload_dir.iterdir()))  # partial file removed
+
+    def test_upload_hugeByHeader_413_beforeReading(self):
+        # act: far over the limit even with the framing allowance
+        response = self.client.put(
+            "/api/presets/5/default", files={"file": ("big.mp3", b"x" * 200_000)}
+        )
+
+        # assert
+        self.assertEqual(413, response.status_code)
+        self.assertFalse(self.cfg.preset_upload_dir.exists())  # refused by the header alone
+
+    def test_upload_timeout_504(self):
+        # arrange
+        self.fake.answers["set_preset_default"] = None
+
+        # act
+        response = self.client.put("/api/presets/5/default", files={"file": ("a.m4a", b"abc")})
+
+        # assert
+        self.assertEqual(504, response.status_code)
+
+    def test_upload_badPin_422(self):
+        self.assertEqual(
+            422, self.client.put("/api/presets/12/default", files={"file": ("a.m4a", b"abc")}).status_code
+        )
+        self.assertEqual([], self.fake.calls)
+
+    def test_audio_servesWav_or404(self):
+        # arrange
+        self.cfg.preset_sounds_dir.mkdir()
+        (self.cfg.preset_sounds_dir / "btn_3.wav").write_bytes(b"RIFFwav")
+
+        # act
+        response = self.client.get("/api/presets/3/audio")
+
+        # assert
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(b"RIFFwav", response.content)
+        self.assertEqual("audio/wav", response.headers["content-type"])
+        self.assertEqual("no-cache", response.headers["cache-control"])
+        self.assertEqual(404, self.client.get("/api/presets/3/audio?which=default").status_code)
+        self.assertEqual(422, self.client.get("/api/presets/3/audio?which=other").status_code)
+        self.assertEqual([], self.fake.calls)  # served by the HTTP thread itself
+
+    def test_restoreAndRename(self):
+        # act
+        self.client.post("/api/presets/4/restore")
+        self.client.patch("/api/presets/4", json={"name": "Skratt"})
+
+        # assert
+        self.assertEqual(
+            [("restore_preset", {"pin": 4}), ("rename_preset", {"pin": 4, "name": "Skratt"})],
+            self.fake.calls,
+        )
+        self.assertEqual(422, self.client.patch("/api/presets/4", json={"name": ""}).status_code)
+        self.assertEqual(422, self.client.patch("/api/presets/4", json={"name": "x" * 25}).status_code)
+
+    def test_list(self):
+        self.assertEqual([], self.client.get("/api/presets").json())
 
 
 class TestLifecycle(unittest.TestCase):

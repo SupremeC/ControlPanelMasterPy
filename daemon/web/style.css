@@ -181,6 +181,27 @@ input[type=color] {
 }
 .grid .btn { padding: 0 6px; white-space: nowrap; }
 
+/* Knappljud */
+.preset { border-top: 1px solid var(--card-edge); padding: 6px 0 4px; }
+.preset .row { min-height: 48px; }
+.preset .row + .row { border-top: none; }
+.preset .name {
+  background: none; border: none; padding: 0;
+  color: var(--text); font: inherit; font-size: 18px; text-align: left; cursor: pointer;
+}
+.preset .name::after { content: " ✎"; color: var(--muted); font-size: 14px; }
+.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--card-edge); color: var(--muted); }
+.chip.default { color: var(--green); border-color: var(--green); }
+.chip.recording { color: var(--amber); border-color: var(--amber); }
+.chip.missing { color: var(--red); border-color: var(--red); }
+.inline { display: flex; gap: 8px; flex: none; }
+.btn.small { min-height: 40px; padding: 0 12px; font-size: 15px; }
+.btn.file { display: inline-flex; align-items: center; justify-content: center; }
+.btn.file input { display: none; }
+.keep { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--muted); font-size: 14px; }
+.keep input { width: 22px; height: 22px; accent-color: var(--amber); }
+progress { width: 100%; height: 8px; accent-color: var(--amber); margin: 4px 0 8px; }
+
 details { margin: 6px 0; }
 summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
 
