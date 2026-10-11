@@ -244,9 +244,12 @@ class TestStaticPage(unittest.TestCase):
 
         # act / assert
         self.assertIn("Kontrollpanelen", client.get("/").text)
-        self.assertEqual("// js", client.get("/app.js").text)
+        script = client.get("/app.js")
+        self.assertEqual("// js", script.text)
+        self.assertEqual("no-cache", script.headers["cache-control"])  # phones revalidate
         self.assertEqual(404, client.get("/nope.css").status_code)
         self.assertEqual(200, client.get("/api/state").status_code)  # API first
+        self.assertNotIn("cache-control", client.get("/api/state").headers)
 
 
 class TestLifecycle(unittest.TestCase):

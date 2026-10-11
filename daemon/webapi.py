@@ -222,6 +222,15 @@ def build_app(request: Request, config: Config | None = None) -> FastAPI:
 
     # ---- the page --------------------------------------------------------------
 
+    @app.middleware("http")
+    async def revalidate_page_files(request, call_next):
+        """A phone keeps app.js for days otherwise; no-cache makes it ask
+        again on every load, and the ETag makes that cheap."""
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     if cfg.web_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(cfg.web_dir), html=True), name="web")
     else:

@@ -718,7 +718,10 @@ class TestNightOff(EventLoopTestCase):
         self.assertFalse(self.cp.demo_on)
         self.assertFalse(self.cp._ctrls.get_ctrl_by_name("BacklightRelay").state)
         self.assertFalse(self.cp._ctrls.get_slavectrl(68).state)
-        self.cp.wled_instance.set_both.assert_called_once_with(64, (255, 0, 34, 0), transition=5)
+        cfg = self.cp._config
+        self.cp.wled_instance.set_both.assert_called_once_with(
+            cfg.night_strip_brightness, cfg.night_strip_rgbw, transition=cfg.night_strip_transition
+        )
         self.cp.wled_instance.set_wled_state.assert_not_called()
 
     def test_whileTheMorningRoutineOwnsTheStrips_theyAreLeftAlone(self):

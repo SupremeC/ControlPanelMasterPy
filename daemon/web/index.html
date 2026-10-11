@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Panelen">
+<title>Kontrollpanelen</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Kontrollpanelen</h1>
+  <div class="status" id="status">
+    <span class="pill" id="st-panel">Panel: ?</span>
+    <span class="pill" id="st-mega">Mega: ?</span>
+    <span class="pill" id="st-alarm">Väckning: –</span>
+    <span class="pill pill-night hidden" id="st-night">Natt</span>
+  </div>
+</header>
+
+<div class="banner hidden" id="banner" role="alert">Panelen svarar inte</div>
+
+<main>
+
+<section class="card">
+  <h2>Uttag</h2>
+  <div class="row">
+    <div class="label">
+      <span>Säng</span>
+      <small id="bed-safety" class="hint hidden">säkerhetsbrytaren på panelen är av</small>
+    </div>
+    <label class="switch"><input type="checkbox" role="switch" id="sw-bed"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="label">
+      <span>Byrå</span>
+      <small id="drawer-safety" class="hint hidden">säkerhetsbrytaren på panelen är av</small>
+    </div>
+    <label class="switch"><input type="checkbox" role="switch" id="sw-drawer"><span></span></label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Lampor</h2>
+  <div class="row">
+    <div class="label"><span>Sänglampa</span><small class="hint">lampan har egen brytare, läget är okänt</small></div>
+    <button class="btn" id="btn-bedlamp">Växla</button>
+  </div>
+  <div class="row">
+    <div class="label"><span>Bakgrundsljus</span></div>
+    <label class="switch"><input type="checkbox" role="switch" id="sw-backlight"><span></span></label>
+  </div>
+
+  <div class="strip" data-segment="0">
+    <div class="row">
+      <div class="label"><span>Ljusslinga säng</span><small class="hint strip-text">?</small></div>
+      <label class="switch"><input type="checkbox" role="switch" class="strip-on"><span></span></label>
+    </div>
+    <div class="row slider-row">
+      <span class="slider-label">Ljusstyrka</span>
+      <input type="range" class="strip-bri" min="0" max="255" step="1" value="128">
+      <input type="color" class="strip-color" value="#ffb050" title="Färg">
+    </div>
+    <div class="row buttons">
+      <button class="btn strip-prev">◀ Effekt</button>
+      <button class="btn strip-off">Enfärgad</button>
+      <button class="btn strip-next">Effekt ▶</button>
+    </div>
+  </div>
+
+  <div class="strip" data-segment="1">
+    <div class="row">
+      <div class="label"><span>Ljusslinga fönster</span><small class="hint strip-text">?</small></div>
+      <label class="switch"><input type="checkbox" role="switch" class="strip-on"><span></span></label>
+    </div>
+    <div class="row slider-row">
+      <span class="slider-label">Ljusstyrka</span>
+      <input type="range" class="strip-bri" min="0" max="255" step="1" value="128">
+      <input type="color" class="strip-color" value="#ffb050" title="Färg">
+    </div>
+    <div class="row buttons">
+      <button class="btn strip-prev">◀ Effekt</button>
+      <button class="btn strip-off">Enfärgad</button>
+      <button class="btn strip-next">Effekt ▶</button>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Ljud</h2>
+  <div class="row slider-row">
+    <span class="slider-label">Volym <b id="vol-text">?</b></span>
+    <input type="range" id="vol" min="0" max="100" step="1" value="50">
+  </div>
+  <small class="hint">Ratten på panelen tar över nästa gång den vrids.</small>
+  <small class="hint warn hidden" id="muted-hint">Ljudet är avstängt på panelen.</small>
+  <div class="grid" id="presets"></div>
+  <details>
+    <summary>Systemljud</summary>
+    <div class="grid" id="sysounds"></div>
+  </details>
+  <div class="row buttons">
+    <button class="btn wide" id="btn-stop">Stoppa ljud</button>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Panel</h2>
+  <div class="row">
+    <div class="label"><span>Demo-läge</span><small class="hint hidden" id="demo-hint">Slå på panelen först.</small></div>
+    <label class="switch"><input type="checkbox" role="switch" id="sw-demo"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="label"><span>Knapplampor</span></div>
+    <label class="switch"><input type="checkbox" role="switch" id="sw-leds"><span></span></label>
+  </div>
+  <div class="row buttons">
+    <button class="btn danger wide" id="btn-alloff">Släck allt</button>
+  </div>
+  <small class="hint">Släcker lampor, ljusslingor och uttag, stoppar ljud och demo. Sänglampan rörs inte.</small>
+</section>
+
+</main>
+
+<div class="toast hidden" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
