@@ -251,7 +251,10 @@ class TestStaticPage(unittest.TestCase):
         self.assertEqual("no-cache", script.headers["cache-control"])  # phones revalidate
         self.assertEqual(404, client.get("/nope.css").status_code)
         self.assertEqual(200, client.get("/api/state").status_code)  # API first
-        self.assertNotIn("cache-control", client.get("/api/state").headers)
+        api_headers = client.get("/api/state").headers
+        self.assertNotIn("cache-control", api_headers)
+        self.assertEqual("close", api_headers["connection"])  # one connection per request
+        self.assertNotIn("connection", script.headers)
 
 
 class TestPresetRoutes(unittest.TestCase):

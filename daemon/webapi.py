@@ -117,24 +117,42 @@ class EventStream(Response):
             await self._generator.aclose()
 
 
-class NoCachePageFiles:
-    """ASGI middleware: Cache-Control: no-cache on everything outside
-    /api/, so a phone asks for app.js again on every load (the ETag
-    makes that cheap). A plain ASGI middleware, not Starlette's
-    BaseHTTPMiddleware: that one runs the app in its own task and hides
-    client disconnects from /api/events."""
+class ResponseHeaders:
+    """ASGI middleware adding two headers.
+
+    - Outside /api/: Cache-Control: no-cache, so a phone asks for app.js
+      again on every load (the ETag makes that cheap).
+    - On /api/ (not the event stream): Connection: close. uvicorn drops
+      an idle keep-alive connection after a few seconds while a Windows
+      client keeps its end; the Stream Deck plugins then sent their next
+      request into a half-closed socket and waited forever, which froze
+      the key. One connection per request costs nothing on the LAN.
+
+    A plain ASGI middleware, not Starlette's BaseHTTPMiddleware: that one
+    runs the app in its own task and hides client disconnects from
+    /api/events."""
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["path"].startswith("/api/"):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        if path == "/api/events":
+            header = None
+        elif path.startswith("/api/"):
+            header = ("Connection", "close")
+        else:
+            header = ("Cache-Control", "no-cache")
+        if header is None:
             await self.app(scope, receive, send)
             return
 
         async def send_with_header(message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message)["Cache-Control"] = "no-cache"
+                MutableHeaders(scope=message)[header[0]] = header[1]
             await send(message)
 
         await self.app(scope, receive, send_with_header)
@@ -471,7 +489,7 @@ def build_app(
 
     # ---- the page --------------------------------------------------------------
 
-    app.add_middleware(NoCachePageFiles)
+    app.add_middleware(ResponseHeaders)
 
     if cfg.web_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(cfg.web_dir), html=True), name="web")
