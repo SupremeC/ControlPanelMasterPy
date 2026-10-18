@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="sv">
+<head>
+	<meta charset="utf-8" />
+	<title>Ljud</title>
+	<link rel="stylesheet" href="pi.css" />
+</head>
+<body>
+	<div class="row">
+		<label for="pin">Knapp</label>
+		<select id="pin" data-setting="pin" data-type="number">
+			<option value="">Välj…</option>
+			<option value="2">Knapp 2</option>
+			<option value="3">Knapp 3</option>
+			<option value="4">Knapp 4</option>
+			<option value="5">Knapp 5</option>
+			<option value="6">Knapp 6</option>
+			<option value="7">Knapp 7</option>
+			<option value="8">Knapp 8</option>
+			<option value="9">Knapp 9</option>
+			<option value="10">Knapp 10</option>
+			<option value="11">Knapp 11</option>
+		</select>
+	</div>
+	<div class="note">Spelar knappens klipp på panelen. Namnet hämtas från panelen.</div>
+	<hr />
+	<div class="row">
+		<label for="host">Panelens adress</label>
+		<input id="host" type="text" placeholder="http://192.168.150.33:8080" />
+	</div>
+	<script src="pi.js"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "Panelen",
+	"Version": "0.1.0.0",
+	"Author": "SupremeC",
+	"Description": "Styr kontrollpanelen: uttag, lampor, ljusslingor, ljud och volym via panelens webb-API.",
+	"Category": "Panelen",
+	"CategoryIcon": "imgs/category",
+	"Icon": "imgs/plugin",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		},
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		}
+	],
+	"Nodejs": {
+		"Version": "24"
+	},
+	"UUID": "com.supremec.panelen",
+	"Actions": [
+		{
+			"Name": "Brytare",
+			"UUID": "com.supremec.panelen.state",
+			"Icon": "imgs/action-state",
+			"Tooltip": "Visar och växlar ett uttag, en lampa, en slinga eller demoläget.",
+			"PropertyInspectorPath": "ui/state.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"UserTitleEnabled": false,
+			"States": [
+				{
+					"Image": "imgs/key",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Kommando",
+			"UUID": "com.supremec.panelen.command",
+			"Icon": "imgs/action-command",
+			"Tooltip": "Släck allt, sänglampan, stoppa ljud eller tyst.",
+			"PropertyInspectorPath": "ui/command.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"UserTitleEnabled": false,
+			"States": [
+				{
+					"Image": "imgs/key",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Ljud",
+			"UUID": "com.supremec.panelen.sound",
+			"Icon": "imgs/action-sound",
+			"Tooltip": "Spelar ett av panelens knappljud.",
+			"PropertyInspectorPath": "ui/sound.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"UserTitleEnabled": false,
+			"States": [
+				{
+					"Image": "imgs/key",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Ratt",
+			"UUID": "com.supremec.panelen.dial",
+			"Icon": "imgs/action-dial",
+			"Tooltip": "Volym, en slingas ljusstyrka eller dess effekt. Tryck: stoppa/växla. Pekskärm: tyst/effekt av.",
+			"PropertyInspectorPath": "ui/dial.html",
+			"Controllers": [
+				"Encoder"
+			],
+			"Encoder": {
+				"layout": "layouts/dial.json",
+				"Icon": "imgs/dial",
+				"TriggerDescription": {
+					"Rotate": "Ändra",
+					"Push": "Växla / stoppa",
+					"Touch": "Tyst / effekt av"
+				}
+			},
+			"States": [
+				{
+					"Image": "imgs/key"
+				}
+			]
+		}
+	]
+}

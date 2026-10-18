@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="sv">
+<head>
+	<meta charset="utf-8" />
+	<title>Brytare</title>
+	<link rel="stylesheet" href="pi.css" />
+</head>
+<body>
+	<div class="row">
+		<label for="item">Vad</label>
+		<select id="item" data-setting="item">
+			<option value="">Välj…</option>
+			<option value="bed_socket">Uttag: säng</option>
+			<option value="drawer_socket">Uttag: byrå</option>
+			<option value="backlight">Bakgrundsbelysning</option>
+			<option value="button_leds">Knapplampor</option>
+			<option value="strip_0">Ljusslinga: säng</option>
+			<option value="strip_1">Ljusslinga: fönster</option>
+			<option value="demo">Demoläge</option>
+		</select>
+	</div>
+	<div class="note">Knappen visar läget och växlar det när du trycker.</div>
+	<hr />
+	<div class="row">
+		<label for="host">Panelens adress</label>
+		<input id="host" type="text" placeholder="http://192.168.150.33:8080" />
+	</div>
+	<script src="pi.js"></script>
+</body>
+</html>

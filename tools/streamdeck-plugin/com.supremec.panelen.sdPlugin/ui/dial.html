@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="sv">
+<head>
+	<meta charset="utf-8" />
+	<title>Ratt</title>
+	<link rel="stylesheet" href="pi.css" />
+</head>
+<body>
+	<div class="row">
+		<label for="kind">Styr</label>
+		<select id="kind" data-setting="kind">
+			<option value="">Välj…</option>
+			<option value="volume">Volym</option>
+			<option value="strip_0">Ljus: slinga säng</option>
+			<option value="strip_1">Ljus: slinga fönster</option>
+			<option value="effect_0">Effekt: slinga säng</option>
+			<option value="effect_1">Effekt: slinga fönster</option>
+		</select>
+	</div>
+	<div class="note">Vrid: ändra. Tryck: stoppa ljud / tänd-släck slingan / effekt av. Peka: tyst / effekt av / tänd-släck.</div>
+	<hr />
+	<div class="row">
+		<label for="host">Panelens adress</label>
+		<input id="host" type="text" placeholder="http://192.168.150.33:8080" />
+	</div>
+	<script src="pi.js"></script>
+</body>
+</html>

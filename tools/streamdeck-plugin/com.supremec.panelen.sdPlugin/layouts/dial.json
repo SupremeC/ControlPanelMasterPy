@@ -1,0 +1,40 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+	"id": "com.supremec.panelen.dial",
+	"items": [
+		{
+			"key": "title",
+			"type": "text",
+			"rect": [16, 6, 168, 24],
+			"font": { "size": 16, "weight": 600 },
+			"alignment": "left",
+			"color": "#e8e8ec"
+		},
+		{
+			"key": "icon",
+			"type": "pixmap",
+			"rect": [16, 34, 44, 44],
+			"value": "imgs/dial.png"
+		},
+		{
+			"key": "value",
+			"type": "text",
+			"rect": [72, 34, 112, 40],
+			"font": { "size": 28, "weight": 600 },
+			"alignment": "right",
+			"color": "#ffffff"
+		},
+		{
+			"key": "indicator",
+			"type": "bar",
+			"rect": [16, 84, 168, 10],
+			"subtype": 4,
+			"range": { "min": 0, "max": 100 },
+			"value": 0,
+			"bar_bg_c": "#3a3a44",
+			"bar_fill_c": "#ffb347",
+			"bar_border_c": "#3a3a44",
+			"border_w": 1
+		}
+	]
+}
