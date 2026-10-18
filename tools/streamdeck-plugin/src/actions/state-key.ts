@@ -18,7 +18,7 @@ type Item = {
 
 export const ITEMS: Record<ItemId, Item> = {
 	bed_socket: { label: "Säng", glyph: "plug", route: "/api/sockets/bed/toggle", read: (s) => s.sockets.bed.on },
-	drawer_socket: { label: "Byrå", glyph: "plug", route: "/api/sockets/drawer/toggle", read: (s) => s.sockets.drawer.on },
+	drawer_socket: { label: "Byrå", glyph: "desklamp", route: "/api/sockets/drawer/toggle", read: (s) => s.sockets.drawer.on },
 	backlight: { label: "Bakgrund", glyph: "sun", route: "/api/backlight/toggle", read: (s) => s.switches.backlight },
 	button_leds: { label: "Knapplampor", glyph: "dots", route: "/api/leds/toggle", read: (s) => s.button_leds },
 	strip_0: {

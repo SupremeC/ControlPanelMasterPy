@@ -11,6 +11,7 @@ export type Glyph =
 	| "play"
 	| "power"
 	| "lamp"
+	| "desklamp"
 	| "note"
 	| "stop"
 	| "speaker"
@@ -38,6 +39,8 @@ const GLYPHS: Record<Glyph, string> = {
 	play: '<path d="M22 12l32 24-32 24z" fill="C" stroke="C" stroke-width="6" stroke-linejoin="round"/>',
 	power: '<path d="M36 8v26" stroke="C" stroke-width="6" stroke-linecap="round"/><path d="M22 18a22 22 0 1 0 28 0" fill="none" stroke="C" stroke-width="6" stroke-linecap="round"/>',
 	lamp: '<path d="M14 38h44L48 10H24zM36 38v20M22 62h28" fill="none" stroke="C" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>',
+	desklamp:
+		'<path d="M30 64h32M46 64L33 28" fill="none" stroke="C" stroke-width="6" stroke-linecap="round"/><path d="M8 30L20 8h18l-2 22z" fill="C" stroke="C" stroke-width="4" stroke-linejoin="round"/><path d="M14 40v9M24 40v9" stroke="C" stroke-width="4" stroke-linecap="round"/>',
 	note: '<path d="M48 8v36M26 16v36M26 16l22-8" fill="none" stroke="C" stroke-width="6" stroke-linecap="round"/><circle cx="17" cy="52" r="9" fill="C"/><circle cx="39" cy="44" r="9" fill="C"/>',
 	stop: '<rect x="14" y="14" width="44" height="44" rx="8" fill="C"/>',
 	speaker:
